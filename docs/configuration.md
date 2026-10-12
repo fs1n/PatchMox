@@ -43,6 +43,17 @@ Keep `PATCHMOX_CONSOLE_LOG=false` for cron/systemd. Set it to `true` when runnin
 
 All `*.policy` files from both directories are evaluated ordered by file name; first match wins. A file in `POLICY_LOCAL_DIR` with the same name as a built-in one replaces it (e.g. your own `99-default.policy`).
 
+### Proxmox API
+
+PatchMox talks to Proxmox only through the cluster API (`pvesh`), never `qm`, so VMs on all cluster nodes work. Every call has a timeout and its error output is logged. Asynchronous tasks (UPID) are polled until they finish; failed tasks are logged with their task log. Guest-agent commands are started via `agent/exec` and polled via `agent/exec-status` until they exit; a non-zero exit code or timeout is logged and the VM is skipped for this run (never reported as outdated). VM description changes use the config `digest`, so concurrent edits by an admin are not overwritten (the change is retried with the fresh config).
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `PVE_API_TIMEOUT` | `60` | Seconds per API call |
+| `PVE_TASK_TIMEOUT` | `300` | Seconds to wait for a task (UPID) |
+| `GUEST_EXEC_TIMEOUT` | `60` | Seconds to wait for a guest-agent command |
+| `PVE_POLL_INTERVAL` | `1` | Seconds between status polls |
+
 ### Version fetch cache
 
 | Variable | Default | Meaning |
@@ -50,7 +61,7 @@ All `*.policy` files from both directories are evaluated ordered by file name; f
 | `VERSION_CACHE_TTL_MINUTES` | `60` | How long fetched VirtIO/QEMU-GA versions are reused |
 | `VERSION_CACHE_FORCE_REFRESH` | `false` | Always fetch fresh versions on the next run |
 
-This avoids hitting the Fedora People Archive on every cron tick.
+This avoids hitting the Fedora People Archive on every cron tick. If the archive is unreachable, an expired cache is used (with a warning); without any cache the check aborts instead of reporting all VMs as outdated.
 
 ### Guest agent cache
 

@@ -1,0 +1,315 @@
+#!/usr/bin/env bash
+#
+# Module: pve.func (PatchMox)
+# Description: Proxmox VE API layer. All calls to the Proxmox API go through
+#              this module: error output of pvesh is captured and logged,
+#              every call has a timeout, asynchronous tasks (UPIDs) are polled
+#              until they finish, and guest-agent commands are executed via the
+#              cluster API (works for VMs on any cluster node, unlike `qm`).
+# Author: Frederik S. (fs1n) and PatchMox Contributors
+# Date: 2026-10-12
+#
+# Dependencies: pvesh, jq, timeout, iconv, base64
+# Environment: PVE_API_TIMEOUT, PVE_TASK_TIMEOUT, GUEST_EXEC_TIMEOUT, PVE_POLL_INTERVAL
+# Usage: source lib/core/pve.func
+#        pve_api get /cluster/resources --type vm
+#        pve_get_vm_config "$node" "$vmid"
+#        pve_set_vm_config "$node" "$vmid" "$digest" --description "..."
+#        pve_guest_powershell "$node" "$vmid" 'Get-Date'
+#
+# Functions:
+#   - pve_api: Run one pvesh call with timeout, error capture and logging
+#   - pve_is_upid: Test whether an API result is a task ID (UPID)
+#   - pve_wait_task: Poll a task until it is stopped, check its exit status, log its output
+#   - pve_api_sync: pve_api + wait for the task if the call returned a UPID
+#   - pve_get_vm_config / pve_set_vm_config: VM config read / write (with digest)
+#   - pve_edit_vm_description: Read-modify-write of a VM description with conflict retry
+#   - pve_guest_exec: Run a command via the guest agent and wait for its result
+#   - pve_guest_powershell: Run a PowerShell script via the guest agent (encoded, no quoting issues)
+
+PVE_API_TIMEOUT="${PVE_API_TIMEOUT:-60}"        # seconds per pvesh call
+PVE_TASK_TIMEOUT="${PVE_TASK_TIMEOUT:-300}"     # seconds to wait for an async task
+GUEST_EXEC_TIMEOUT="${GUEST_EXEC_TIMEOUT:-60}"  # seconds to wait for a guest-agent command
+PVE_POLL_INTERVAL="${PVE_POLL_INTERVAL:-1}"     # seconds between status polls
+
+# @function pve_api
+# @description Runs a single pvesh call. stdout is the JSON result; stderr of
+#              pvesh is captured and logged on failure instead of being dropped.
+# @args [--warn] method (get|set|create|delete), path, [pvesh args...]
+#       --warn logs failures as warning instead of error (expected failures)
+# @returns 0 and JSON on stdout on success, 1 on error or timeout
+function pve_api() {
+    local fail_level="error"
+    if [[ "${1-}" == "--warn" ]]; then
+        fail_level="warn"
+        shift
+    fi
+    local method="$1" path="$2"
+    shift 2
+
+    local err_file
+    if ! err_file=$(mktemp "${TMPDIR:-/tmp}/patchmox-pvesh.XXXXXX"); then
+        log_error "PVE API: cannot create temp file for $method $path"
+        return 1
+    fi
+
+    local out rc=0 started=$SECONDS
+    out=$(timeout "$PVE_API_TIMEOUT" pvesh "$method" "$path" "$@" --output-format json 2>"$err_file") || rc=$?
+    local err
+    err=$(tr '\n' ' ' < "$err_file" | sed -e 's/[[:space:]]*$//')
+    rm -f "$err_file"
+
+    if [[ $rc -eq 124 ]]; then
+        "log_$fail_level" "PVE API: $method $path timed out after ${PVE_API_TIMEOUT}s"
+        return 1
+    elif [[ $rc -ne 0 ]]; then
+        "log_$fail_level" "PVE API: $method $path failed (exit $rc): ${err:-no error output}"
+        return 1
+    fi
+
+    log_debug "PVE API: $method $path ok ($((SECONDS - started))s)"
+    if [[ -n "$err" ]]; then
+        log_debug "PVE API: $method $path stderr: $err"
+    fi
+    printf '%s\n' "$out"
+}
+
+# @function pve_is_upid
+# @description Returns 0 if the given API result is a task ID (UPID).
+# @args result (string): raw pve_api output
+# @returns 0 if UPID (printed unquoted on stdout), 1 otherwise
+function pve_is_upid() {
+    local result="${1-}"
+    local value
+    value=$(jq -r 'if type == "string" then . else empty end' 2>/dev/null <<< "$result") || return 1
+    if [[ "$value" == UPID:* ]]; then
+        echo "$value"
+        return 0
+    fi
+    return 1
+}
+
+# @function _pve_log_task_output
+# @description Writes the last lines of a task log to the PatchMox log.
+# @args node, upid, level (debug|warn|error)
+function _pve_log_task_output() {
+    local node="$1" upid="$2" level="${3:-error}"
+    local task_log line
+    task_log=$(pve_api get "/nodes/$node/tasks/$upid/log" --limit 500) || return 0
+    while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        "log_$level" "  task $upid: $line"
+    done < <(jq -r '.[]?.t // empty' <<< "$task_log" | tail -n 20)
+}
+
+# @function pve_wait_task
+# @description Polls a Proxmox task until it has stopped, then checks its exit
+#              status. Failed tasks are logged together with their task log.
+# @args upid (string), timeout_seconds (optional, default PVE_TASK_TIMEOUT)
+# @returns 0 if the task finished OK (or with warnings), 1 on failure/timeout
+function pve_wait_task() {
+    local upid="$1"
+    local timeout="${2:-$PVE_TASK_TIMEOUT}"
+    local node
+    node=$(cut -d: -f2 <<< "$upid")
+
+    if [[ -z "$node" ]]; then
+        log_error "PVE task: invalid UPID '$upid'"
+        return 1
+    fi
+
+    log_debug "PVE task: waiting for $upid (timeout ${timeout}s)"
+    local started=$SECONDS status_json status exitstatus
+    while true; do
+        status_json=$(pve_api get "/nodes/$node/tasks/$upid/status") || return 1
+        status=$(jq -r '.status // empty' <<< "$status_json")
+
+        if [[ "$status" == "stopped" ]]; then
+            exitstatus=$(jq -r '.exitstatus // "unknown"' <<< "$status_json")
+            case "$exitstatus" in
+                OK)
+                    log_debug "PVE task: $upid finished OK ($((SECONDS - started))s)"
+                    return 0
+                    ;;
+                WARNINGS*)
+                    log_warn "PVE task: $upid finished with $exitstatus"
+                    _pve_log_task_output "$node" "$upid" warn
+                    return 0
+                    ;;
+                *)
+                    log_error "PVE task: $upid failed: $exitstatus"
+                    _pve_log_task_output "$node" "$upid" error
+                    return 1
+                    ;;
+            esac
+        fi
+
+        if (( SECONDS - started >= timeout )); then
+            log_error "PVE task: $upid still ${status:-unknown} after ${timeout}s, giving up waiting (the task keeps running on $node)"
+            return 1
+        fi
+        sleep "$PVE_POLL_INTERVAL"
+    done
+}
+
+# @function pve_api_sync
+# @description Like pve_api, but if the call returns a task ID the task is
+#              awaited, so the caller only continues once the change is done.
+# @args method, path, [pvesh args...]
+# @returns 0 on success (result or empty on stdout), 1 on error
+function pve_api_sync() {
+    local result upid
+    result=$(pve_api "$@") || return 1
+    if upid=$(pve_is_upid "$result"); then
+        pve_wait_task "$upid" || return 1
+        return 0
+    fi
+    printf '%s\n' "$result"
+}
+
+# @function pve_get_vm_config
+# @description Reads the (current) config of a VM, including its digest.
+# @args node, vmid
+# @returns JSON config on stdout, 1 on error
+function pve_get_vm_config() {
+    local node="$1" vmid="$2"
+    pve_api get "/nodes/$node/qemu/$vmid/config" --current 1
+}
+
+# @function pve_set_vm_config
+# @description Changes VM config options. With a digest, Proxmox rejects the
+#              change if the config was modified since it was read (no lost updates).
+# @args node, vmid, digest (may be empty), [pvesh option args...]
+# @returns 0 on success, 1 on error
+function pve_set_vm_config() {
+    local node="$1" vmid="$2" digest="$3"
+    shift 3
+    local digest_args=()
+    if [[ -n "$digest" && "$digest" != "null" ]]; then
+        digest_args=(--digest "$digest")
+    fi
+    # --warn: a digest conflict is expected and retried by the caller
+    pve_api_sync --warn set "/nodes/$node/qemu/$vmid/config" "$@" "${digest_args[@]}" >/dev/null
+}
+
+# @function pve_edit_vm_description
+# @description Changes a VM description via a callback, protected by the config
+#              digest. If someone else changed the config in between, Proxmox
+#              rejects the write and the edit is retried with the fresh config.
+# @args node, vmid, callback — callback gets the current description as $1 and
+#       prints the new one; callback exit 1 = no change needed
+# @returns 0 on success or if nothing changed, 1 on error
+function pve_edit_vm_description() {
+    local node="$1" vmid="$2" callback="$3"
+    local attempt config digest current new
+    for attempt in 1 2 3; do
+        config=$(pve_get_vm_config "$node" "$vmid") || return 1
+        digest=$(jq -r '.digest // empty' <<< "$config")
+        current=$(jq -r '.description // empty' <<< "$config")
+
+        new=$("$callback" "$current") || return 0
+        if [[ "$new" == "$current" ]]; then
+            return 0
+        fi
+
+        local set_args=(--description "$new")
+        if [[ -z "$new" ]]; then
+            set_args=(--delete description)
+        fi
+        if pve_set_vm_config "$node" "$vmid" "$digest" "${set_args[@]}"; then
+            return 0
+        fi
+
+        # Retry only on a real conflict (config changed since we read it).
+        local fresh_digest
+        fresh_digest=$(pve_get_vm_config "$node" "$vmid" | jq -r '.digest // empty') || fresh_digest=""
+        if [[ -z "$fresh_digest" || "$fresh_digest" == "$digest" ]]; then
+            log_error "VM $vmid: description update failed"
+            return 1
+        fi
+        log_warn "VM $vmid: config was changed concurrently (attempt $attempt/3), retrying with fresh config"
+    done
+    log_error "VM $vmid: could not update description, config keeps changing (3 attempts)"
+    return 1
+}
+
+# @function pve_guest_exec
+# @description Runs a command in the guest via the QEMU guest agent API and
+#              polls exec-status until the command has exited.
+# @args node, vmid, command, [arguments...]
+# @returns 0 and the command's stdout on success; 1 if the agent is not
+#          reachable, the command times out or exits non-zero
+function pve_guest_exec() {
+    local node="$1" vmid="$2"
+    shift 2
+
+    local cmd_args=() arg
+    for arg in "$@"; do
+        # --command=VALUE so values starting with '-' are never parsed as options
+        cmd_args+=("--command=$arg")
+    done
+
+    local start_json pid
+    # Failure here is usually "guest agent not running" — a warning, not an error.
+    start_json=$(pve_api --warn create "/nodes/$node/qemu/$vmid/agent/exec" "${cmd_args[@]}") || return 1
+    pid=$(jq -r '.pid // empty' <<< "$start_json")
+    if [[ -z "$pid" ]]; then
+        log_error "VM $vmid: guest agent exec returned no pid: $start_json"
+        return 1
+    fi
+    log_debug "VM $vmid: guest command started (pid $pid): $1"
+
+    local started=$SECONDS status_json exited
+    while true; do
+        status_json=$(pve_api get "/nodes/$node/qemu/$vmid/agent/exec-status" --pid "$pid") || return 1
+        exited=$(jq -r '.exited // 0' <<< "$status_json")
+        if [[ "$exited" == "1" || "$exited" == "true" ]]; then
+            break
+        fi
+        if (( SECONDS - started >= GUEST_EXEC_TIMEOUT )); then
+            log_error "VM $vmid: guest command (pid $pid) did not finish within ${GUEST_EXEC_TIMEOUT}s"
+            return 1
+        fi
+        sleep "$PVE_POLL_INTERVAL"
+    done
+
+    local exitcode signal err_data
+    exitcode=$(jq -r '.exitcode // empty' <<< "$status_json")
+    signal=$(jq -r '.signal // empty' <<< "$status_json")
+    err_data=$(jq -r '."err-data" // empty' <<< "$status_json" | tr '\r\n' '  ')
+
+    if [[ "$(jq -r '."out-truncated" // 0' <<< "$status_json")" == "1" ]]; then
+        log_warn "VM $vmid: guest command output was truncated by the agent"
+    fi
+
+    if [[ -n "$signal" ]]; then
+        log_error "VM $vmid: guest command (pid $pid) was terminated by signal $signal"
+        return 1
+    fi
+    if [[ "$exitcode" != "0" ]]; then
+        log_warn "VM $vmid: guest command (pid $pid) exited with code ${exitcode:-unknown}: ${err_data:0:500}"
+        return 1
+    fi
+    if [[ -n "$err_data" ]]; then
+        log_debug "VM $vmid: guest command stderr: ${err_data:0:500}"
+    fi
+
+    log_debug "VM $vmid: guest command (pid $pid) finished in $((SECONDS - started))s"
+    jq -r '."out-data" // empty' <<< "$status_json"
+}
+
+# @function pve_guest_powershell
+# @description Runs a PowerShell script in a Windows guest. The script is sent
+#              as -EncodedCommand (UTF-16LE base64), so quotes, $ and backslashes
+#              need no escaping.
+# @args node, vmid, script
+# @returns see pve_guest_exec
+function pve_guest_powershell() {
+    local node="$1" vmid="$2" script="$3"
+    local encoded
+    encoded=$(printf '%s' "$script" | iconv -f UTF-8 -t UTF-16LE | base64 -w0) || {
+        log_error "VM $vmid: failed to encode PowerShell script"
+        return 1
+    }
+    pve_guest_exec "$node" "$vmid" powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand "$encoded"
+}

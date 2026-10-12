@@ -34,7 +34,8 @@ Event Bus: dispatch_event("update.available", payload)
 
 | File | Responsibility |
 |------|--------------|
-| `logger.func` | File, console, and journal logging |
+| `logger.func` | File, console (stderr), and journal logging |
+| `pve.func` | Proxmox API layer: `pve_api` (timeout, error capture), task polling (`pve_wait_task`), guest-agent exec, digest-protected config edits |
 | `events.func` | `build_event`, `emit_event`, `dispatch_event` — event pipeline entry point, payload builders |
 | `policy.func` | Load and evaluate policy files (`load_policies`, `evaluate_policy`, `_policy_matches_event`) |
 | `state.func` | Per-VM persistent state, guest-agent cache |

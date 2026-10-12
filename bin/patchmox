@@ -76,6 +76,22 @@ done
 PATCHMOX_CMD="${1:-help}"
 shift || true
 
+# @function acquire_run_lock
+# @description Ensures only one check/cleanup runs at a time (timer + manual run
+#              would otherwise send duplicate notifications and race on state).
+#              The lock is released automatically when the process exits.
+function acquire_run_lock() {
+  ensure_state_dir || exit 1
+  local lock_file="$STATE_DIR/patchmox.lock"
+  exec 9>"$lock_file"
+  if ! flock -n 9; then
+    log_warn "Another PatchMox run is in progress (lock: $lock_file), exiting"
+    echo "Another PatchMox run is in progress, try again later." >&2
+    exit 1
+  fi
+  log_debug "Acquired run lock $lock_file"
+}
+
 function show_help() {
   cat <<EOF
 PatchMox ${PATCHMOX_VERSION} — Proxmox VE update orchestrator
@@ -113,6 +129,8 @@ function cmd_check() {
     VERSION_CACHE_FORCE_REFRESH=true
     GUEST_AGENT_CACHE_FORCE_REFRESH=true
   fi
+
+  acquire_run_lock
 
   # Ensure spinner/progress is cleaned up on interrupt or normal exit.
   trap 'stop_spinner; clear_progress; exit 130' INT TERM
@@ -160,15 +178,22 @@ function cmd_check() {
   start_spinner "Fetching latest VirtIO and QEMU GA versions..."
   log_debug "Fetching latest versions (force_refresh=${VERSION_CACHE_FORCE_REFRESH:-false}, ttl=${VERSION_CACHE_TTL_MINUTES:-60}m)"
   local virtio_info CurrentVirtIOVersion CurrentVirtIORelease
-  virtio_info=$(fetch_latest_virtio_version)
-  CurrentVirtIOVersion=$(echo "$virtio_info" | jq -r '.version')
-  CurrentVirtIORelease=$(echo "$virtio_info" | jq -r '.release')
-
   local qemu_info CurrentQEMUGAVersion CurrentQEMUGARelease
-  qemu_info=$(fetch_latest_qemu_ga_version)
-  CurrentQEMUGAVersion=$(echo "$qemu_info" | jq -r '.version')
-  CurrentQEMUGARelease=$(echo "$qemu_info" | jq -r '.release')
+  if ! virtio_info=$(fetch_latest_virtio_version) || ! qemu_info=$(fetch_latest_qemu_ga_version); then
+    stop_spinner
+    log_error "Aborting check: latest versions unknown, refusing to flag VMs as outdated"
+    exit 1
+  fi
+  CurrentVirtIOVersion=$(echo "$virtio_info" | jq -r '.version // empty')
+  CurrentVirtIORelease=$(echo "$virtio_info" | jq -r '.release // empty')
+  CurrentQEMUGAVersion=$(echo "$qemu_info" | jq -r '.version // empty')
+  CurrentQEMUGARelease=$(echo "$qemu_info" | jq -r '.release // empty')
   stop_spinner
+
+  if [[ -z "$CurrentVirtIOVersion" || -z "$CurrentQEMUGAVersion" ]]; then
+    log_error "Aborting check: latest versions unknown (VirtIO='$CurrentVirtIOVersion', QEMU GA='$CurrentQEMUGAVersion')"
+    exit 1
+  fi
 
   log_debug "Latest versions: VirtIO=$CurrentVirtIOVersion (release: $CurrentVirtIORelease), QEMU GA=$CurrentQEMUGAVersion (release: $CurrentQEMUGARelease)"
 
@@ -180,6 +205,7 @@ function cmd_check() {
   vm_index=0
 
   local vms_checked=0
+  local vms_skipped=0
   local updates_available=0
   local nags_shown=0
   local nags_removed=0
@@ -204,8 +230,13 @@ function cmd_check() {
       QEMU_GA_version=$(echo "$cached_versions" | jq -r '.qemu_ga')
     else
       log_debug "VM $vmid: querying guest agent for installed versions"
-      VirtIO_version=$(get_windows_virtio_version "$vmid")
-      QEMU_GA_version=$(get_windows_QEMU_GA_version "$vmid")
+      if ! VirtIO_version=$(get_windows_virtio_version "$node" "$vmid") || \
+         ! QEMU_GA_version=$(get_windows_QEMU_GA_version "$node" "$vmid"); then
+        # Unknown is not outdated: keep banner/state as they are and try again next run.
+        log_warn "VM $vmid: could not query installed versions via guest agent, skipping"
+        vms_skipped=$((vms_skipped + 1))
+        continue
+      fi
     fi
 
     vms_checked=$((vms_checked + 1))
@@ -319,11 +350,12 @@ function cmd_check() {
   local completed_payload
   completed_payload=$(jq -n \
     --argjson vms_checked "$vms_checked" \
+    --argjson vms_skipped "$vms_skipped" \
     --argjson total_vms "$total_vms" \
     --argjson updates_available "$updates_available" \
     --argjson nags_shown "$nags_shown" \
     --argjson nags_removed "$nags_removed" \
-    '{vms_checked: $vms_checked, total_vms: $total_vms, updates_available: $updates_available, nags_shown: $nags_shown, nags_removed: $nags_removed}')
+    '{vms_checked: $vms_checked, vms_skipped: $vms_skipped, total_vms: $total_vms, updates_available: $updates_available, nags_shown: $nags_shown, nags_removed: $nags_removed}')
   emit_event "check.completed" "$completed_payload" >/dev/null
 
   log_debug "Check completed: $vms_checked/$total_vms checked, $updates_available updates, $nags_shown nags shown, $nags_removed removed"
@@ -331,6 +363,7 @@ function cmd_check() {
   local summary
   summary="Checked ${vms_checked}/${total_vms} VM"
   if [[ "$vms_checked" -ne 1 ]]; then summary+="s"; fi
+  if [[ "$vms_skipped" -gt 0 ]]; then summary+=" (${vms_skipped} skipped: guest agent not reachable)"; fi
   summary+=". ${updates_available} update"
   if [[ "$updates_available" -ne 1 ]]; then summary+="s"; fi
   summary+=" available. ${nags_shown} nag"
@@ -658,13 +691,15 @@ function cmd_cleanup() {
     esac
   done
 
+  [[ "$DRY_RUN" == true ]] || acquire_run_lock
+
   local vms_with_nag
   if ! vms_with_nag=$(list_vms_with_nag); then
     echo "ERROR: could not read cluster resources (is this a Proxmox VE node?)" >&2
     exit 1
   fi
 
-  local removed=0 failed=0 vmid node
+  local removed=0 failed=0 vmid node failed_vmids=""
   while read -r vmid node; do
     [[ -z "$vmid" ]] && continue
     if [[ ${#TARGET_VMIDS[@]} -gt 0 && " ${TARGET_VMIDS[*]} " != *" $vmid "* ]]; then
@@ -682,16 +717,18 @@ function cmd_cleanup() {
     else
       echo "Failed to remove banner from VM $vmid (node $node)" >&2
       failed=$((failed + 1))
+      failed_vmids+=" $vmid"
     fi
   done <<< "$vms_with_nag"
 
   local svg_count=0 target
   if [[ ${#TARGET_VMIDS[@]} -gt 0 ]]; then
     for target in "${TARGET_VMIDS[@]}"; do
-      svg_count=$((svg_count + $(remove_nag_svg_files "$target" "$DRY_RUN")))
+      svg_count=$((svg_count + $(remove_nag_svg_files "$target" "$DRY_RUN" "$failed_vmids")))
     done
   else
-    svg_count=$(remove_nag_svg_files "" "$DRY_RUN")
+    # Keep the image of VMs whose banner could not be removed (no broken image).
+    svg_count=$(remove_nag_svg_files "" "$DRY_RUN" "$failed_vmids")
   fi
 
   if [[ "$DRY_RUN" == true ]]; then
