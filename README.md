@@ -39,6 +39,26 @@ chmod +x bin/patchmox install.sh
 patchmox check
 ```
 
+### Debian package
+
+Download the `.deb` from the [releases](https://github.com/fs1n/PatchMox/releases) page and install it on the Proxmox node:
+
+```bash
+apt install ./patchmox_<version>_all.deb
+nano /etc/patchmox/patchmox.env
+patchmox check
+systemctl enable --now patchmox.timer   # daily check at ~06:00
+```
+
+| Path | Content |
+|------|---------|
+| `/etc/patchmox/patchmox.env` | Configuration (kept on upgrade) |
+| `/etc/patchmox/policies/` | Policies |
+| `/var/lib/patchmox/` | State and job queue |
+| `/var/log/patchmox/` | Logs |
+
+Build it yourself with [nfpm](https://nfpm.goreleaser.com/): `packaging/build-deb.sh`. Pushing a `v*` tag builds the package in CI and attaches it to a GitHub release.
+
 ### Upgrading from the legacy scripts
 
 The wrappers `check-vm-updates.sh` and `vm-update.sh` have been removed, together with the inbound "click to update" webhook. If a cron job or systemd timer still calls them, switch it to the CLI:

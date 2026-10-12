@@ -10,3 +10,5 @@ email.txt
 .claude/
 AGENTS.md
 queue/
+build/
+dist/
