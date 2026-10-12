@@ -5,13 +5,13 @@
 # Author: Frederik S. (fs1n) and PatchMox Contributors
 # Date: 2026-07-15
 #
-# Dependencies: sed, cp, mv, qm, pvesh
+# Dependencies: sed, cp, mv, pvesh
 # Environment: SCRIPT_DIR, SVG_IMAGE_PATH
 # Usage: source lib/actions/show-nag.action; maybe_show_update_nag ...
 
-SVG_IMAGE_PATH="/usr/share/pve-manager/images/"
-SVG_IMAGE_TEMPLATE="${SCRIPT_DIR}/templates/svg/update-nag-template.svg"
-SVG_IMAGE_TEMPLATE_BOTH="${SCRIPT_DIR}/templates/svg/update-nag-both-template.svg"
+SVG_IMAGE_PATH="${SVG_IMAGE_PATH:-/usr/share/pve-manager/images/}"
+SVG_IMAGE_TEMPLATE="${SVG_IMAGE_TEMPLATE:-${SCRIPT_DIR}/templates/svg/update-nag-template.svg}"
+SVG_IMAGE_TEMPLATE_BOTH="${SVG_IMAGE_TEMPLATE_BOTH:-${SCRIPT_DIR}/templates/svg/update-nag-both-template.svg}"
 
 # Escape untrusted strings for sed replacement (/, \, &)
 escape_sed_replacement() {
@@ -93,7 +93,7 @@ function build_svg_qemu_ga_update_nag() {
 
 # @function update_vm_description_with_update_nag
 # @description Adds SVG update banner to Proxmox VM description, preserving existing content.
-#              Suppresses qm set stdout so it does not pollute the terminal during progress output.
+#              Uses the cluster API (pvesh) so VMs on other cluster nodes work as well.
 function update_vm_description_with_update_nag() {
     local node=$1
     local vmid=$2
@@ -118,7 +118,7 @@ function update_vm_description_with_update_nag() {
         local new_description="${update_banner}<hr/>${current_description}"
     fi
 
-    if qm set "$vmid" -description "$new_description" >/dev/null 2>&1; then
+    if pvesh set "/nodes/$node/qemu/$vmid/config" --description "$new_description" >/dev/null 2>&1; then
         return 0
     else
         log_error "Failed to update description for VM $vmid"

@@ -11,6 +11,7 @@
 #   patchmox apply --vmid ID [--component virtio|qemu-ga]
 #   patchmox policy --dry-run [--vmid ID]
 #   patchmox state --vmid ID
+#   patchmox cleanup [--dry-run] [--vmid ID]
 #   patchmox version
 
 set -euo pipefail
@@ -86,6 +87,7 @@ Usage:
   patchmox apply --vmid ID [--component virtio|qemu-ga]
   patchmox policy --dry-run [--vmid ID]
   patchmox state --vmid ID
+  patchmox cleanup [--dry-run] [--vmid ID]   remove all update banners
   patchmox version
   patchmox help
 
@@ -644,6 +646,64 @@ EOF
   fi
 }
 
+function cmd_cleanup() {
+  local DRY_RUN=false
+  local TARGET_VMIDS=()
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --dry-run) DRY_RUN=true; shift ;;
+      --vmid) TARGET_VMIDS+=("$2"); shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  local vms_with_nag
+  if ! vms_with_nag=$(list_vms_with_nag); then
+    echo "ERROR: could not read cluster resources (is this a Proxmox VE node?)" >&2
+    exit 1
+  fi
+
+  local removed=0 failed=0 vmid node
+  while read -r vmid node; do
+    [[ -z "$vmid" ]] && continue
+    if [[ ${#TARGET_VMIDS[@]} -gt 0 && " ${TARGET_VMIDS[*]} " != *" $vmid "* ]]; then
+      continue
+    fi
+    if [[ "$DRY_RUN" == true ]]; then
+      echo "Would remove banner from VM $vmid (node $node)"
+      removed=$((removed + 1))
+      continue
+    fi
+    if remove_vm_nag "$node" "$vmid"; then
+      mark_nag_inactive "$vmid"
+      echo "Removed banner from VM $vmid (node $node)"
+      removed=$((removed + 1))
+    else
+      echo "Failed to remove banner from VM $vmid (node $node)" >&2
+      failed=$((failed + 1))
+    fi
+  done <<< "$vms_with_nag"
+
+  local svg_count=0 target
+  if [[ ${#TARGET_VMIDS[@]} -gt 0 ]]; then
+    for target in "${TARGET_VMIDS[@]}"; do
+      svg_count=$((svg_count + $(remove_nag_svg_files "$target" "$DRY_RUN")))
+    done
+  else
+    svg_count=$(remove_nag_svg_files "" "$DRY_RUN")
+  fi
+
+  if [[ "$DRY_RUN" == true ]]; then
+    echo "Dry run: $removed banner(s) and $svg_count image(s) would be removed."
+  else
+    echo "Cleanup done: $removed banner(s) removed, $svg_count image(s) deleted, $failed failed."
+    log_info "Cleanup: $removed banner(s) removed, $svg_count image(s) deleted, $failed failed"
+  fi
+
+  [[ "$failed" -eq 0 ]]
+}
+
 case "$PATCHMOX_CMD" in
   check)
     cmd_check "$@"
@@ -662,6 +722,9 @@ case "$PATCHMOX_CMD" in
     ;;
   state)
     cmd_state "$@"
+    ;;
+  cleanup)
+    cmd_cleanup "$@"
     ;;
   version|--version|-V)
     echo "patchmox $PATCHMOX_VERSION"

@@ -71,7 +71,7 @@ The wrappers `check-vm-updates.sh` and `vm-update.sh` have been removed, togethe
 /opt/patchmox/bin/patchmox check
 ```
 
-Leftovers on existing hosts can be removed manually: `/opt/patchmox/check-vm-updates.sh`, `/opt/patchmox/vm-update.sh`, `/opt/patchmox/webhook/` and the `patchmox-webhook.service` unit.
+Old clickable banners are removed with `patchmox cleanup` (the next check adds the new ones). Leftovers on existing hosts can be removed manually: `/opt/patchmox/check-vm-updates.sh`, `/opt/patchmox/vm-update.sh`, `/opt/patchmox/webhook/` and the `patchmox-webhook.service` unit.
 
 ## Documentation
 
@@ -95,6 +95,10 @@ patchmox worker --once
 
 # Show stored state for a VM
 patchmox state --vmid 100
+
+# Remove all update banners from the Proxmox UI
+patchmox cleanup --dry-run
+patchmox cleanup
 ```
 
 ## Requirements

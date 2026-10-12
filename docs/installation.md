@@ -95,7 +95,12 @@ git pull
 
 ## Uninstall
 
+Debian package: `apt remove patchmox` (banners are removed automatically), `apt purge patchmox` also deletes config, state and logs.
+
+Git install:
+
 ```bash
+patchmox cleanup          # remove update banners from all VMs
 rm /usr/local/bin/patchmox
 rm -rf /opt/patchmox
 rm -rf /etc/systemd/system/patchmox-check.*
