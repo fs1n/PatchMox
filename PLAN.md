@@ -157,7 +157,7 @@ Default decision if no policy matches:
 
 ## Performance: guest-agent cache and concurrency
 
-The slow part is not the orchestrator CPU; it is the **per-VM guest-agent round-trip** (`qm guest exec`). Two complementary tools address this.
+The slow part is not the orchestrator CPU; it is the **per-VM guest-agent round-trip** (`agent/exec` via the API). Two complementary tools address this.
 
 ### Guest-agent cache (first)
 
@@ -373,7 +373,7 @@ Update the top-of-file comment in every `.sh` and `.func` file:
 
 ### Offline driver push
 
-For VMs without guest internet access, PatchMox could download the VirtIO/QEMU-GA ISO on the host and attach it to the VM as a virtual CD-ROM via `qm set <vmid> -ide2 ...`. `qm guest exec` could then run the bundled installer (`virtio-win-guest-tools.exe` or `msiexec /i ...`) inside the VM. Reboot would be handled by the worker. This needs careful design around ISO lifecycle, reboot coordination, and first-install bootstrapping (when QEMU Guest Agent is not yet present).
+For VMs without guest internet access, PatchMox could download the VirtIO/QEMU-GA ISO on the host and attach it to the VM as a virtual CD-ROM via the API (`pvesh set /nodes/<node>/qemu/<vmid>/config --ide2 ...`). `agent/exec` could then run the bundled installer (`virtio-win-guest-tools.exe` or `msiexec /i ...`) inside the VM. Reboot would be handled by the worker. This needs careful design around ISO lifecycle, reboot coordination, and first-install bootstrapping (when QEMU Guest Agent is not yet present).
 
 ### Windows Updates and template freshness
 

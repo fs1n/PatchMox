@@ -8,7 +8,7 @@ PatchMox runs on a Proxmox VE node. It needs root-equivalent privileges because 
 
 - Proxmox VE 8.0+ (tested on 8.x and 9.x)
 - Bash 4+
-- `jq`, `curl`, `pvesh`, `qm`, `sed`, `awk`, `grep`
+- `jq`, `curl`, `pvesh`, `sed`, `awk`, `grep`
 - Network access to `https://fedorapeople.org` for version checks
 
 ### Guest (Windows VMs)

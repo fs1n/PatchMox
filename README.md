@@ -105,7 +105,7 @@ patchmox cleanup
 
 - Proxmox VE 8.0+
 - Bash 4+
-- `jq`, `curl`, `pvesh`, `qm`
+- `jq`, `curl`, `pvesh`
 - Windows guests with QEMU Guest Agent and VirtIO drivers installed
 
 ## License

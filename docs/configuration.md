@@ -45,7 +45,7 @@ All `*.policy` files from both directories are evaluated ordered by file name; f
 
 ### Proxmox API
 
-PatchMox talks to Proxmox only through the cluster API (`pvesh`), never `qm`, so VMs on all cluster nodes work. Every call has a timeout and its error output is logged. Asynchronous tasks (UPID) are polled until they finish; failed tasks are logged with their task log. Guest-agent commands are started via `agent/exec` and polled via `agent/exec-status` until they exit; a non-zero exit code or timeout is logged and the VM is skipped for this run (never reported as outdated). VM description changes use the config `digest`, so concurrent edits by an admin are not overwritten (the change is retried with the fresh config).
+PatchMox talks to Proxmox only through the cluster API (`pvesh`), so VMs on all cluster nodes work. Every call has a timeout and its error output is logged. Asynchronous tasks (UPID) are polled until they finish; failed tasks are logged with their task log. Guest-agent commands are started via `agent/exec` and polled via `agent/exec-status` until they exit; a non-zero exit code or timeout is logged and the VM is skipped for this run (never reported as outdated). VM description changes use the config `digest`, so concurrent edits by an admin are not overwritten (the change is retried with the fresh config).
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
@@ -70,7 +70,7 @@ This avoids hitting the Fedora People Archive on every cron tick. If the archive
 | `GUEST_AGENT_CACHE_TTL_MINUTES` | `60` | How long queried VirtIO/QEMU-GA versions per VM are reused |
 | `GUEST_AGENT_CACHE_FORCE_REFRESH` | `false` | Always query the guest agent on the next run |
 
-This skips `qm guest exec` calls for VMs that were recently checked and have not changed (same `vmgenid`, still running). It is the highest-impact performance optimization for daily cron schedules.
+This skips guest-agent queries (`agent/exec`) for VMs that were recently checked and have not changed (same `vmgenid`, still running). It is the highest-impact performance optimization for daily cron schedules.
 
 ### SVG banners
 

@@ -5,7 +5,7 @@
 #              this module: error output of pvesh is captured and logged,
 #              every call has a timeout, asynchronous tasks (UPIDs) are polled
 #              until they finish, and guest-agent commands are executed via the
-#              cluster API (works for VMs on any cluster node, unlike `qm`).
+#              cluster API (works for VMs on any cluster node).
 # Author: Frederik S. (fs1n) and PatchMox Contributors
 # Date: 2026-10-12
 #

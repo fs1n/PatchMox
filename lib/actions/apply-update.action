@@ -6,7 +6,7 @@
 # Author: Frederik S. (fs1n) and PatchMox Contributors
 # Date: 2026-07-15
 #
-# Dependencies: qm, jq
+# Dependencies: pve.func, jq
 # Environment: SCRIPT_DIR
 # Usage: source lib/actions/apply-update.action; apply_update_action "$job_json"
 
