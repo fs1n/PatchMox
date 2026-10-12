@@ -19,8 +19,8 @@ if [[ -z "${VERSION:-}" ]]; then
 fi
 export VERSION="${VERSION#v}"
 
-# Package config = package paths + documented defaults from .env.example
+# Version shipped in the package (read by `patchmox version`)
 mkdir -p build dist
-cat packaging/paths.env .env.example > build/patchmox.env
+printf '%s\n' "$VERSION" > build/VERSION
 
 nfpm package --config packaging/nfpm.yaml --packager deb --target dist/

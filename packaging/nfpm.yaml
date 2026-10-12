@@ -3,13 +3,14 @@
 #                 VERSION=1.2.3 packaging/build-deb.sh
 # Docs: https://nfpm.goreleaser.com/configuration/
 #
-# Layout (works with the current SCRIPT_DIR-based code, no refactor needed):
-#   /usr/share/patchmox/       code (bin, lib, templates)
-#   /usr/bin/patchmox          -> /usr/share/patchmox/bin/patchmox
-#   /usr/share/patchmox/.env   -> /etc/patchmox/patchmox.env
-#   /etc/patchmox/             config + policies (conffiles, kept on upgrade)
-#   /var/lib/patchmox/         state + queue
-#   /var/log/patchmox/         logs
+# Layout:
+#   /usr/share/patchmox/              code, built-in policies, defaults.env, VERSION
+#   /usr/bin/patchmox                 -> /usr/share/patchmox/bin/patchmox
+#   /etc/patchmox/patchmox.env        config (conffile, kept on upgrade)
+#   /etc/patchmox/policies.d/         admin policies (override built-ins by name)
+#   /var/lib/patchmox/                state + queue
+#   /var/log/patchmox/                logs
+# Paths are set in packaging/defaults.env.
 
 name: patchmox
 arch: all
@@ -44,23 +45,26 @@ contents:
   - src: ./templates
     dst: /usr/share/patchmox/templates
     type: tree
+  - src: ./policies
+    dst: /usr/share/patchmox/policies
+    type: tree
+  - src: ./packaging/defaults.env
+    dst: /usr/share/patchmox/defaults.env
+  - src: ./build/VERSION
+    dst: /usr/share/patchmox/VERSION
 
-  # CLI + config symlinks
+  # CLI
   - src: /usr/share/patchmox/bin/patchmox
     dst: /usr/bin/patchmox
     type: symlink
-  - src: /etc/patchmox/patchmox.env
-    dst: /usr/share/patchmox/.env
-    type: symlink
 
   # Config (conffiles: never overwritten on upgrade if changed by the admin)
-  - src: ./build/patchmox.env
+  - src: ./.env.example
     dst: /etc/patchmox/patchmox.env
     type: config|noreplace
     file_info: { mode: 0640 }
-  - src: ./policies/99-default.policy
-    dst: /etc/patchmox/policies/99-default.policy
-    type: config|noreplace
+  - dst: /etc/patchmox/policies.d
+    type: dir
 
   # systemd
   - src: ./packaging/systemd/patchmox.service

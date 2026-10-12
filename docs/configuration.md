@@ -1,11 +1,17 @@
 # Configuration
 
-PatchMox is configured through a single `.env` file in the project root (`/opt/patchmox/.env`). Copy `.env.example` and adjust.
+PatchMox is configured through a single env file:
 
-```bash
-cp .env.example .env
-nano .env
-```
+| Install | Config file | Paths |
+|---------|-------------|-------|
+| Debian package | `/etc/patchmox/patchmox.env` | FHS, from `/usr/share/patchmox/defaults.env` |
+| Git checkout (`install.sh`) | `<patchmox>/.env` (copy of `.env.example`) | inside `<patchmox>/` |
+
+Set `PATCHMOX_CONFIG=/path/to/file` in the environment to use another config file.
+
+Load order (later wins): `defaults.env` (package only) → config file. Variables already set in the environment take precedence over `defaults.env`.
+
+`patchmox version` prints the version: from `<patchmox>/VERSION` (written at package build time from the git tag), else `git describe`, else `dev`.
 
 ## Key settings
 
@@ -13,7 +19,7 @@ nano .env
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `LOG_DIR` | `<patchmox>/logs` | Where `patchmox.log` lives |
+| `LOG_DIR` | `<patchmox>/logs` (package: `/var/log/patchmox`) | Where `patchmox.log` lives |
 | `LOG_LEVEL` | `info` | `debug`, `info`, `notice`, `warn`, `error` |
 | `PATCHMOX_CONSOLE_LOG` | `false` | Print log lines to the terminal; default is file + journal only |
 | `USE_JOURNAL` | `true` | Log to systemd journal with tag `PatchMox` |
@@ -25,8 +31,17 @@ Keep `PATCHMOX_CONSOLE_LOG=false` for cron/systemd. Set it to `true` when runnin
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `STATE_DIR` | `<patchmox>/.state` | Per-VM state files and version cache |
-| `QUEUE_DIR` | `<patchmox>/queue` | Job queue directories |
+| `STATE_DIR` | `<patchmox>/.state` (package: `/var/lib/patchmox/state`) | Per-VM state files and version cache |
+| `QUEUE_DIR` | `<patchmox>/queue` (package: `/var/lib/patchmox/queue`) | Job queue directories |
+
+### Policies
+
+| Variable | Default | Meaning |
+|----------|---------|---------|
+| `POLICY_DIR` | `<patchmox>/policies` (package: `/usr/share/patchmox/policies`) | Built-in policies |
+| `POLICY_LOCAL_DIR` | — (package: `/etc/patchmox/policies.d`) | Your own policies |
+
+All `*.policy` files from both directories are evaluated ordered by file name; first match wins. A file in `POLICY_LOCAL_DIR` with the same name as a built-in one replaces it (e.g. your own `99-default.policy`).
 
 ### Version fetch cache
 

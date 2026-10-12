@@ -11,6 +11,7 @@
 #   patchmox apply --vmid ID [--component virtio|qemu-ga]
 #   patchmox policy --dry-run [--vmid ID]
 #   patchmox state --vmid ID
+#   patchmox version
 
 set -euo pipefail
 
@@ -18,16 +19,39 @@ set -euo pipefail
 PATCHMOX_SCRIPT_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd -- "$(dirname -- "$PATCHMOX_SCRIPT_PATH")/.." && pwd)"
 LIB_DIR="$SCRIPT_DIR/lib"
-ENV_FILE="$SCRIPT_DIR/.env"
+
+# Install-specific defaults (paths, config location). Only present in the
+# Debian package (/usr/share/patchmox/defaults.env); a git checkout keeps
+# everything inside SCRIPT_DIR. Values already set in the environment win.
+if [[ -f "$SCRIPT_DIR/defaults.env" ]]; then
+  set -o allexport
+  # shellcheck source=packaging/defaults.env
+  . "$SCRIPT_DIR/defaults.env"
+  set +o allexport
+fi
+
+# Config file: PATCHMOX_CONFIG (environment or defaults.env), else SCRIPT_DIR/.env.
+ENV_FILE="${PATCHMOX_CONFIG:-$SCRIPT_DIR/.env}"
 
 # Load environment overrides if they exist (before computing LOG_FILE so
-# that LOG_DIR / LOG_FILE from .env actually take effect).
+# that LOG_DIR / LOG_FILE from the config actually take effect).
 if [[ -f "$ENV_FILE" ]]; then
   set -o allexport
   # shellcheck source=.env.example
   . "$ENV_FILE"
   set +o allexport
 fi
+
+# Version: VERSION file written at package build time, else git, else "dev".
+if [[ -f "$SCRIPT_DIR/VERSION" ]]; then
+  PATCHMOX_VERSION="$(< "$SCRIPT_DIR/VERSION")"
+elif [[ -e "$SCRIPT_DIR/.git" ]] && command -v git >/dev/null 2>&1; then
+  PATCHMOX_VERSION="$(git -C "$SCRIPT_DIR" describe --tags --always --dirty 2>/dev/null || echo dev)"
+  PATCHMOX_VERSION="${PATCHMOX_VERSION#v}"
+else
+  PATCHMOX_VERSION="dev"
+fi
+export PATCHMOX_VERSION
 
 # Default log file path. Can be overridden by setting LOG_FILE or LOG_DIR in .env.
 LOG_FILE="${LOG_FILE:-${LOG_DIR:-$SCRIPT_DIR/logs}/patchmox.log}"
@@ -53,7 +77,7 @@ shift || true
 
 function show_help() {
   cat <<EOF
-PatchMox — Proxmox VE update orchestrator
+PatchMox ${PATCHMOX_VERSION} — Proxmox VE update orchestrator
 
 Usage:
   patchmox check [--vmid ID] [--force-refresh]
@@ -62,7 +86,10 @@ Usage:
   patchmox apply --vmid ID [--component virtio|qemu-ga]
   patchmox policy --dry-run [--vmid ID]
   patchmox state --vmid ID
+  patchmox version
   patchmox help
+
+Config: ${ENV_FILE}
 EOF
 }
 
@@ -635,6 +662,9 @@ case "$PATCHMOX_CMD" in
     ;;
   state)
     cmd_state "$@"
+    ;;
+  version|--version|-V)
+    echo "patchmox $PATCHMOX_VERSION"
     ;;
   help|--help|-h)
     show_help

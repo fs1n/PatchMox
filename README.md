@@ -53,11 +53,12 @@ systemctl enable --now patchmox.timer   # daily check at ~06:00
 | Path | Content |
 |------|---------|
 | `/etc/patchmox/patchmox.env` | Configuration (kept on upgrade) |
-| `/etc/patchmox/policies/` | Policies |
+| `/etc/patchmox/policies.d/` | Your own policies (a file named like a built-in one replaces it) |
+| `/usr/share/patchmox/policies/` | Built-in policies |
 | `/var/lib/patchmox/` | State and job queue |
 | `/var/log/patchmox/` | Logs |
 
-Build it yourself with [nfpm](https://nfpm.goreleaser.com/): `packaging/build-deb.sh`. Pushing a `v*` tag builds the package in CI and attaches it to a GitHub release.
+`patchmox version` shows the installed version. Build the package yourself with [nfpm](https://nfpm.goreleaser.com/): `packaging/build-deb.sh`. Pushing a `v*` tag builds the package in CI (version = tag) and attaches it to a GitHub release.
 
 ### Upgrading from the legacy scripts
 

@@ -14,6 +14,7 @@
 #   {
 #     "source":  "patchmox",
 #     "host":    "<hostname of the PVE node>",
+#     "version": "<PatchMox version>",
 #     "subject": "PatchMox: update.available",
 #     "message": "<plain-text message>",
 #     "text":    "<subject + message>",   # Slack/Mattermost/Rocket.Chat compatible
@@ -65,12 +66,14 @@ function channel_send_webhook() {
     local payload
     payload=$(jq -n \
         --arg host "$(hostname 2>/dev/null || echo unknown)" \
+        --arg version "${PATCHMOX_VERSION:-dev}" \
         --arg subject "$subject" \
         --arg message "$message" \
         --argjson event "$event_json" \
         '{
             source: "patchmox",
             host: $host,
+            version: $version,
             subject: $subject,
             message: $message,
             text: ($subject + "\n\n" + $message),
@@ -105,6 +108,7 @@ function channel_send_webhook() {
 
     local response http_code curl_rc=0
     response=$(curl --silent --show-error \
+        --user-agent "PatchMox/${PATCHMOX_VERSION:-dev}" \
         --max-time "$timeout" \
         -X "$method" \
         "${header_args[@]}" \
