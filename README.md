@@ -18,7 +18,7 @@ It discovers Windows VMs automatically, queries installed versions via the QEMU 
 - Version fetch caching to avoid repeated network requests
 - Filesystem-based job queue with `patchmox worker`
 - Policy-driven decisions (default: notify-only)
-- Inbound webhook support for clickable SVG banners
+- Notifications via SMTP and outgoing webhook (JSON)
 
 ## What is not ready
 

@@ -1,26 +1,129 @@
 #!/usr/bin/env bash
 #
 # Module: webhook.channel (PatchMox)
-# Description: Outgoing webhook notification channel (stub for Phase 1).
+# Description: Outgoing webhook notification channel. Sends a JSON document to
+#              WEBHOOK_URL whenever a notification is dispatched (e.g. update.available).
 # Author: Frederik S. (fs1n) and PatchMox Contributors
 # Date: 2026-07-15
 #
-# Dependencies: curl
-# Environment: WEBHOOK_URL, WEBHOOK_METHOD, WEBHOOK_HEADERS
-# Usage: source lib/channels/webhook.channel; channel_send_webhook "subject" "body"
+# Dependencies: curl, jq
+# Environment: WEBHOOK_URL, WEBHOOK_METHOD, WEBHOOK_HEADERS, WEBHOOK_TIMEOUT
+# Usage: source lib/channels/webhook.channel; channel_send_webhook "subject" "body" [content_type] [event_json]
+#
+# Payload sent to WEBHOOK_URL:
+#   {
+#     "source":  "patchmox",
+#     "host":    "<hostname of the PVE node>",
+#     "subject": "PatchMox: update.available",
+#     "message": "<plain-text message>",
+#     "text":    "<subject + message>",   # Slack/Mattermost/Rocket.Chat compatible
+#     "event":   { ...canonical event... } # null for non-event notifications
+#   }
+
+# @function _webhook_redact_url
+# @description Returns scheme://host of a URL so tokens in path/query never reach the logs.
+function _webhook_redact_url() {
+    local url="${1-}"
+    echo "$url" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://[^/?]+).*#\1#'
+}
 
 # @function channel_send_webhook
-# @description Sends notification via HTTP POST to configured webhook endpoint.
+# @description Sends notification as JSON via HTTP to the configured webhook endpoint.
+# @args subject body [content_type] [event_json]
+# @returns 0 on success (or when not configured), 1 on error
 function channel_send_webhook() {
     local subject=${1-}
     local body=${2-}
-    local content_type="${3:-application/json}"
+    local content_type="${3:-text/plain}"
+    local event_json="${4-}"
 
     if [[ -z "${WEBHOOK_URL-}" ]]; then
-        log_debug "Outgoing webhook URL not configured; skipping"
+        log_error "WEBHOOK_URL is required for webhook notifications"
+        return 1
+    fi
+
+    if ! command -v curl >/dev/null 2>&1; then
+        log_error "curl is required for webhook notifications but not found"
+        return 1
+    fi
+
+    local method="${WEBHOOK_METHOD:-POST}"
+    local timeout="${WEBHOOK_TIMEOUT:-10}"
+    local target
+    target=$(_webhook_redact_url "$WEBHOOK_URL")
+
+    # Webhook consumers want plain text, not the HTML email template.
+    local message="$body"
+    if [[ -n "$event_json" ]] && jq -e . >/dev/null 2>&1 <<< "$event_json"; then
+        if [[ "$content_type" == "text/html" ]]; then
+            message=$(build_notification_text "$event_json")
+        fi
+    else
+        event_json="null"
+    fi
+
+    local payload
+    payload=$(jq -n \
+        --arg host "$(hostname 2>/dev/null || echo unknown)" \
+        --arg subject "$subject" \
+        --arg message "$message" \
+        --argjson event "$event_json" \
+        '{
+            source: "patchmox",
+            host: $host,
+            subject: $subject,
+            message: $message,
+            text: ($subject + "\n\n" + $message),
+            event: $event
+        }') || {
+        log_error "webhook: failed to build JSON payload"
+        return 1
+    }
+
+    # Custom headers from WEBHOOK_HEADERS (JSON object). Content-Type defaults to JSON.
+    local header_args=()
+    local has_content_type=false
+    if [[ -n "${WEBHOOK_HEADERS-}" ]]; then
+        if ! jq -e 'type == "object"' >/dev/null 2>&1 <<< "$WEBHOOK_HEADERS"; then
+            log_error "webhook: WEBHOOK_HEADERS must be a JSON object, e.g. '{\"Authorization\": \"Bearer ...\"}'"
+            return 1
+        fi
+        local header
+        while IFS= read -r header; do
+            [[ -z "$header" ]] && continue
+            header_args+=(-H "$header")
+            if [[ "${header,,}" == content-type:* ]]; then
+                has_content_type=true
+            fi
+        done < <(jq -r 'to_entries[] | "\(.key): \(.value)"' <<< "$WEBHOOK_HEADERS")
+    fi
+    if [[ "$has_content_type" == false ]]; then
+        header_args+=(-H "Content-Type: application/json")
+    fi
+
+    log_debug "webhook: sending $method to $target (subject: $subject)"
+
+    local response http_code curl_rc=0
+    response=$(curl --silent --show-error \
+        --max-time "$timeout" \
+        -X "$method" \
+        "${header_args[@]}" \
+        --data-binary @- \
+        -w '\n%{http_code}' \
+        "$WEBHOOK_URL" <<< "$payload" 2>&1) || curl_rc=$?
+    http_code="${response##*$'\n'}"
+    response="${response%$'\n'*}"
+
+    if [[ $curl_rc -ne 0 ]]; then
+        log_error "webhook: request to $target failed (curl exit $curl_rc): $response"
+        return 1
+    fi
+
+    if [[ "$http_code" =~ ^2[0-9][0-9]$ ]]; then
+        log_info "Webhook notification sent to $target (HTTP $http_code)"
         return 0
     fi
 
-    log_warn "Outgoing webhook channel is not fully implemented (subject: $subject)"
-    return 0
+    log_error "webhook: $target responded with HTTP $http_code: ${response:0:500}"
+    return 1
 }

@@ -6,7 +6,7 @@
 #
 # Usage:
 #   patchmox check [--vmid ID] [--force-refresh]
-#   patchmox notify [--channel smtp]
+#   patchmox notify [--test] [--channel smtp|webhook]
 #   patchmox worker [--once] [--max-jobs N] [--daemon]
 #   patchmox apply --vmid ID [--component virtio|qemu-ga]
 #   patchmox policy --dry-run [--vmid ID]
@@ -57,7 +57,7 @@ PatchMox — Proxmox VE update orchestrator
 
 Usage:
   patchmox check [--vmid ID] [--force-refresh]
-  patchmox notify [--channel smtp]
+  patchmox notify [--test] [--channel smtp|webhook]
   patchmox worker [--once] [--max-jobs N] [--daemon]
   patchmox apply --vmid ID [--component virtio|qemu-ga]
   patchmox policy --dry-run [--vmid ID]
@@ -257,9 +257,6 @@ function cmd_check() {
           nags_shown=$((nags_shown + 1))
           vm_result+=", nag shown"
           emit_event "nag.shown" "$event_payload" >/dev/null
-          if [[ "${WEBHOOK_ENABLED:-false}" == "true" ]]; then
-            add_hook "$vmid"
-          fi
         else
           vm_result+=", nag failed"
         fi
@@ -278,9 +275,6 @@ function cmd_check() {
         fi
         save_vm_state "$vmid" "$VirtIO_version" "$QEMU_GA_version" "false" "$vmgenid" "$status"
         emit_event "nag.removed" "$event_payload" >/dev/null
-        if [[ "${WEBHOOK_ENABLED:-false}" == "true" ]]; then
-          remove_hook "$vmid"
-        fi
         ;;
       *)
         log_warn "Unknown nag_status='$nag_status' for VM $vmid; saving state without nag."
@@ -470,20 +464,29 @@ function cmd_notify() {
 
   init_state_dir
 
+  # --channel limits this run to a single channel (e.g. --channel webhook)
+  if [[ -n "$CHANNEL" ]]; then
+    NOTIFICATION_CHANNELS="$CHANNEL"
+  fi
+
   if [[ "$TEST_MODE" == true ]]; then
     if [[ -z "${NOTIFICATION_CHANNELS:-}" ]]; then
       log_error "No notification channels configured. Set NOTIFICATION_CHANNELS in .env, e.g. NOTIFICATION_CHANNELS=smtp"
       exit 1
     fi
-    if [[ -z "${SMTP_HOST:-}" || -z "${MAIL_TO:-}" ]]; then
+    if [[ ",${NOTIFICATION_CHANNELS// /}," == *",smtp,"* ]] && [[ -z "${SMTP_HOST:-}" || -z "${MAIL_TO:-}" ]]; then
       log_error "SMTP test requires SMTP_HOST and MAIL_TO to be configured in .env"
       exit 1
     fi
+    if [[ ",${NOTIFICATION_CHANNELS// /}," == *",webhook,"* && -z "${WEBHOOK_URL:-}" ]]; then
+      log_error "Webhook test requires WEBHOOK_URL to be configured in .env"
+      exit 1
+    fi
 
-    local test_subject="PatchMox SMTP test"
+    local test_subject="PatchMox test notification"
     local test_body="This is a test notification from PatchMox.
 
-If you receive this email, SMTP is configured correctly."
+If you receive this message, the notification channel is configured correctly."
     if notification_send "$test_subject" "$test_body"; then
       log_info "Test notification sent successfully"
     else

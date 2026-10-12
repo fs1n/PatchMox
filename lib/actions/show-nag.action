@@ -106,13 +106,7 @@ function update_vm_description_with_update_nag() {
     local current_description
     current_description=$(echo "$current_vm_config" | jq -r '.description // empty')
 
-    local update_banner
-    if [[ -n "${WEBHOOK_HOST:-}" && -n "${WEBHOOK_SECRET:-}" ]]; then
-        local webhook_url="http://${WEBHOOK_HOST}:${WEBHOOK_PORT:-9000}/hooks/${vmid}?token=${WEBHOOK_SECRET}"
-        update_banner='<a href="'"$webhook_url"'" target="_blank"><img src="/pve2/images/update-'"$vmid"'.svg" alt="VirtIO Update - Click to Update" /></a>'
-    else
-        update_banner='<img src="/pve2/images/update-'"$vmid"'.svg" alt="VirtIO Update" />'
-    fi
+    local update_banner='<img src="/pve2/images/update-'"$vmid"'.svg" alt="VirtIO Update" />'
 
     if [ -z "$current_description" ] || [ "$current_description" = "null" ]; then
         local new_description="$update_banner"

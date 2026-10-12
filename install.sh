@@ -16,7 +16,7 @@ echo "Installing PatchMox from $SOURCE_DIR to $TARGET_DIR ..."
 sudo mkdir -p "$TARGET_DIR"
 
 # Copy tracked/top-level files and directories explicitly
-for item in bin lib policies templates webhook check-vm-updates.sh vm-update.sh \
+for item in bin lib policies templates check-vm-updates.sh \
             .env.example .gitignore LICENSE README.md install.sh; do
     if [[ -e "$SOURCE_DIR/$item" ]]; then
         sudo cp -a "$SOURCE_DIR/$item" "$TARGET_DIR/$item"
@@ -32,7 +32,6 @@ fi
 # Ensure executables are executable
 sudo chmod +x "$TARGET_DIR/bin/patchmox"
 sudo chmod +x "$TARGET_DIR/check-vm-updates.sh"
-sudo chmod +x "$TARGET_DIR/vm-update.sh"
 
 # Link the CLI into /usr/local/bin
 sudo ln -sf "$TARGET_DIR/bin/patchmox" "$BIN_LINK"

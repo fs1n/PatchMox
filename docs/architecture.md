@@ -5,7 +5,7 @@ PatchMox is a host-side Bash orchestrator for Proxmox VE. It discovers Windows V
 ## High-level flow
 
 ```
-Trigger (cron / manual / webhook)
+Trigger (cron / systemd timer / manual)
     │
     ▼
 Source: virtio.source — discover VMs, query guest-agent, fetch latest versions
@@ -41,7 +41,6 @@ Event Bus: dispatch_event("update.available", payload)
 | `queue.func` | Filesystem job queue primitives |
 | `progress.func` | Interactive spinner and progress output |
 | `utils.func` | Dependency checks with caching |
-| `webhook.func` | Maintain `webhook/hooks.json` for inbound clicks |
 
 ### Sources (`lib/sources/`)
 
@@ -65,7 +64,7 @@ Event Bus: dispatch_event("update.available", payload)
 | `_dispatcher.channel` | `notification_send` — routes to enabled channels via `NOTIFICATION_CHANNELS` |
 | `smtp.channel` | SMTP notifications via curl |
 | `msgraph.channel` | MS Graph notifications (stub) |
-| `webhook.channel` | Outgoing webhook notifications (stub) |
+| `webhook.channel` | Outgoing webhook notifications (JSON POST) |
 
 ## Event pipeline
 

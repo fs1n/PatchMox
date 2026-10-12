@@ -61,25 +61,46 @@ This skips `qm guest exec` calls for VMs that were recently checked and have not
 | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM` | SMTP settings |
 | `MAIL_TO` | Comma-separated list of recipients (string recommended) |
 | `MSGRAPH_*` | Microsoft Graph mail settings (stub) |
-| `WEBHOOK_URL` | Outgoing webhook URL (stub) |
+| `WEBHOOK_*` | Outgoing webhook settings (see below) |
 
-SMTP is the only fully implemented channel. TLS mode is derived from `SMTP_PORT`:
+SMTP and webhook are fully implemented; MS Graph is a stub. SMTP TLS mode is derived from `SMTP_PORT`:
 
 - 25 → opportunistic STARTTLS
 - 587 → required STARTTLS (default)
 - 465 → implicit TLS
 
-### Inbound webhook (optional)
+### Outgoing webhook
 
-This is the clickable SVG banner in Proxmox UI. When clicked, it calls `vm-update.sh` via `adnanh/webhook`.
+When `webhook` is listed in `NOTIFICATION_CHANNELS`, every notification (e.g. `update.available`) is sent as JSON to `WEBHOOK_URL`. The webhook only notifies; it does not trigger updates.
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `WEBHOOK_ENABLED` | `false` | Enable clickable SVG links |
-| `WEBHOOK_HOST` | — | IP/hostname of this PVE node |
-| `WEBHOOK_PORT` | `9000` | Port the webhook server listens on |
-| `WEBHOOK_SECRET` | `changeme` | Token for click authentication |
-| `WEBHOOK_SERVICE` | `patchmox-webhook.service` | Systemd service to restart on hook changes |
+| `WEBHOOK_URL` | — | Target URL (required) |
+| `WEBHOOK_METHOD` | `POST` | HTTP method |
+| `WEBHOOK_HEADERS` | — | Extra headers as JSON object, e.g. `{"Authorization": "Bearer ..."}` |
+| `WEBHOOK_TIMEOUT` | `10` | Request timeout in seconds |
+
+Payload:
+
+```json
+{
+  "source": "patchmox",
+  "host": "pve01",
+  "subject": "PatchMox: update.available",
+  "message": "PatchMox detected available updates for VM 101 on node pve01. ...",
+  "text": "PatchMox: update.available\n\nPatchMox detected available updates ...",
+  "event": {
+    "event_id": "…",
+    "timestamp": "2026-10-12T08:00:00Z",
+    "type": "update.available",
+    "payload": { "vmid": "101", "node": "pve01", "components": ["virtio"], "current": {…}, "latest": {…} }
+  }
+}
+```
+
+`text` makes the payload work directly with Slack, Mattermost and Rocket.Chat incoming webhooks. `event` is `null` for non-event notifications (test, summary). Any non-2xx response is logged as an error.
+
+Test the setup with `patchmox notify --test --channel webhook`.
 
 ## Performance tuning
 

@@ -7,14 +7,17 @@
 #
 # Dependencies: smtp.channel, msgraph.channel, webhook.channel
 # Environment: NOTIFICATION_CHANNELS
-# Usage: source lib/channels/_dispatcher.channel; notification_send "subject" "body" [content_type]
+# Usage: source lib/channels/_dispatcher.channel; notification_send "subject" "body" [content_type] [event_json]
 
 # @function notification_send
 # @description Dispatches update notifications to all enabled channels.
+# @args subject body [content_type] [event_json]
+#       event_json is the canonical event (if any); the webhook channel forwards it.
 function notification_send() {
     local subject=${1-}
     local body=${2-}
     local content_type="${3:-text/plain}"
+    local event_json="${4-}"
 
     if [[ -z "${NOTIFICATION_CHANNELS-}" ]]; then
         log_debug "No notification channels configured (NOTIFICATION_CHANNELS empty), skipping"
@@ -31,7 +34,7 @@ function notification_send() {
         case "$trimmed_channel" in
             smtp) channel_send_smtp "$subject" "$body" "$content_type" ;;
             msgraph) channel_send_msgraph "$subject" "$body" "$content_type" ;;
-            webhook) channel_send_webhook "$subject" "$body" "$content_type" ;;
+            webhook) channel_send_webhook "$subject" "$body" "$content_type" "$event_json" ;;
             *) log_warn "Unknown notification channel: $trimmed_channel" ;;
         esac
     done
