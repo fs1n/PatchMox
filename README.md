@@ -39,6 +39,19 @@ chmod +x bin/patchmox install.sh
 patchmox check
 ```
 
+### Upgrading from the legacy scripts
+
+The wrappers `check-vm-updates.sh` and `vm-update.sh` have been removed, together with the inbound "click to update" webhook. If a cron job or systemd timer still calls them, switch it to the CLI:
+
+```bash
+# before
+/opt/patchmox/check-vm-updates.sh
+# after
+/opt/patchmox/bin/patchmox check
+```
+
+Leftovers on existing hosts can be removed manually: `/opt/patchmox/check-vm-updates.sh`, `/opt/patchmox/vm-update.sh`, `/opt/patchmox/webhook/` and the `patchmox-webhook.service` unit.
+
 ## Documentation
 
 - [Installation](docs/installation.md)
