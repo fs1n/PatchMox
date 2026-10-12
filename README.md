@@ -8,49 +8,13 @@ PatchMox is a host-side Bash orchestrator for **Proxmox VE** that keeps Windows 
 
 It discovers Windows VMs automatically, queries installed versions via the QEMU Guest Agent, fetches the latest releases from the [Fedora People Archive](https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/), and renders SVG update banners directly inside the Proxmox VE UI.
 
-## What works
-
-- Automatic discovery of Windows VMs on the Proxmox cluster
-- Installed VirtIO / QEMU Guest Agent version detection via QEMU Guest Agent
-- Latest version lookup from the Fedora People Archive
-- SVG update banners in the Proxmox UI
-- Persistent per-VM state with `vmgenid` clone/restore detection
-- Version fetch caching to avoid repeated network requests
-- Filesystem-based job queue with `patchmox worker`
-- Policy-driven decisions (default: notify-only)
-- Notifications via SMTP and outgoing webhook (JSON)
-
-## What is not ready
-
-- In-VM auto-update execution is a stub; the worker calls a placeholder action
-- Node-level concurrency for large clusters is planned
-
-See [`PLAN.md`](PLAN.md) for the full roadmap.
-
 ## Quick start
 
 ```bash
-git clone https://github.com/fs1n/PVE-QEMU-VirtIO-Updater.git /opt/patchmox
-cd /opt/patchmox
-cp .env.example .env
-nano .env
-chmod +x bin/patchmox install.sh
-./install.sh
+<-- ADD PATCHMOX REPO -->
+apt update && apt install -y PatchMox
 patchmox check
 ```
-
-### Upgrading from the legacy scripts
-
-The wrappers `check-vm-updates.sh` and `vm-update.sh` have been removed, together with the inbound "click to update" webhook. If a cron job or systemd timer still calls them, switch it to the CLI:
-
-```bash
-# before
-/opt/patchmox/check-vm-updates.sh
-# after
-/opt/patchmox/bin/patchmox check
-```
-
-Leftovers on existing hosts can be removed manually: `/opt/patchmox/check-vm-updates.sh`, `/opt/patchmox/vm-update.sh`, `/opt/patchmox/webhook/` and the `patchmox-webhook.service` unit.
 
 ## Documentation
 
@@ -85,4 +49,4 @@ patchmox state --vmid 100
 
 ## License
 
-MIT — see [LICENSE](LICENSE).
+MIT - see [LICENSE](LICENSE)
