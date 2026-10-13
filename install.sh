@@ -35,4 +35,9 @@ sudo chmod +x "$TARGET_DIR/bin/patchmox"
 # Link the CLI into /usr/local/bin
 sudo ln -sf "$TARGET_DIR/bin/patchmox" "$BIN_LINK"
 
+# Bash completion
+if [[ -d /etc/bash_completion.d ]]; then
+    sudo cp "$SOURCE_DIR/packaging/completion/patchmox.bash" /etc/bash_completion.d/patchmox
+fi
+
 echo "PatchMox installed. Test with: patchmox check"

@@ -72,6 +72,10 @@ contents:
   - src: ./packaging/systemd/patchmox.timer
     dst: /lib/systemd/system/patchmox.timer
 
+  # Shell completion
+  - src: ./packaging/completion/patchmox.bash
+    dst: /usr/share/bash-completion/completions/patchmox
+
   # Docs
   - src: ./README.md
     dst: /usr/share/doc/patchmox/README.md

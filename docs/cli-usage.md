@@ -109,3 +109,7 @@ Note: the next `patchmox check` shows banners again for VMs that still need upda
 ## `patchmox version`
 
 Prints the installed version.
+
+## Shell completion
+
+Bash completion for commands, options and VM IDs is installed with the Debian package (`/usr/share/bash-completion/completions/patchmox`) and by `install.sh` (`/etc/bash_completion.d/patchmox`). It is active in new shells. VM IDs after `--vmid` come from the cluster VM list `/etc/pve/.vmlist` (QEMU VMs only), so completion needs no API call.

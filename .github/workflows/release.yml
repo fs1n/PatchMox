@@ -49,6 +49,12 @@ jobs:
             bash -n "$f"
           done
 
+      - name: Completion covers all commands
+        run: |
+          help_cmds=$(bin/patchmox help | awk '$1 == "patchmox" {print $2}' | sort -u)
+          comp_cmds=$(sed -n 's/^ *local commands="\(.*\)"/\1/p' packaging/completion/patchmox.bash | tr ' ' '\n' | sort -u)
+          diff <(echo "$help_cmds") <(echo "$comp_cmds")
+
       - name: Build package
         env:
           VERSION: ${{ steps.version.outputs.version }}
