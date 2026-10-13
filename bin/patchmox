@@ -36,7 +36,11 @@ ENV_FILE="${PATCHMOX_CONFIG:-$SCRIPT_DIR/.env}"
 
 # Load environment overrides if they exist (before computing LOG_FILE so
 # that LOG_DIR / LOG_FILE from the config actually take effect).
-if [[ -f "$ENV_FILE" ]]; then
+if [[ -f "$ENV_FILE" && ! -r "$ENV_FILE" ]]; then
+  # e.g. /etc/patchmox/patchmox.env is 0640 root: `patchmox version` / `help`
+  # must still work for other users.
+  echo "patchmox: cannot read config $ENV_FILE (run as root?), continuing without it" >&2
+elif [[ -f "$ENV_FILE" ]]; then
   set -o allexport
   # shellcheck source=.env.example
   . "$ENV_FILE"
@@ -82,6 +86,11 @@ shift || true
 #              The lock is released automatically when the process exits.
 function acquire_run_lock() {
   ensure_state_dir || exit 1
+  if ! command -v flock >/dev/null 2>&1; then
+    log_error "flock (util-linux) is required but not found"
+    echo "ERROR: flock (util-linux) is required but not found" >&2
+    exit 1
+  fi
   local lock_file="$STATE_DIR/patchmox.lock"
   exec 9>"$lock_file"
   if ! flock -n 9; then
@@ -177,17 +186,19 @@ function cmd_check() {
 
   start_spinner "Fetching latest VirtIO and QEMU GA versions..."
   log_debug "Fetching latest versions (force_refresh=${VERSION_CACHE_FORCE_REFRESH:-false}, ttl=${VERSION_CACHE_TTL_MINUTES:-60}m)"
-  local virtio_info CurrentVirtIOVersion CurrentVirtIORelease
-  local qemu_info CurrentQEMUGAVersion CurrentQEMUGARelease
-  if ! virtio_info=$(fetch_latest_virtio_version) || ! qemu_info=$(fetch_latest_qemu_ga_version); then
+  local latest_info CurrentVirtIOVersion CurrentVirtIORelease
+  local CurrentQEMUGAVersion CurrentQEMUGARelease
+  if ! latest_info=$(fetch_latest_versions); then
     stop_spinner
     log_error "Aborting check: latest versions unknown, refusing to flag VMs as outdated"
     exit 1
   fi
-  CurrentVirtIOVersion=$(echo "$virtio_info" | jq -r '.version // empty')
-  CurrentVirtIORelease=$(echo "$virtio_info" | jq -r '.release // empty')
-  CurrentQEMUGAVersion=$(echo "$qemu_info" | jq -r '.version // empty')
-  CurrentQEMUGARelease=$(echo "$qemu_info" | jq -r '.release // empty')
+  local latest_fields=()
+  mapfile -t latest_fields < <(jq -r '.virtio.version // "", .virtio.release // "", .qemu_ga.version // "", .qemu_ga.release // ""' <<< "$latest_info")
+  CurrentVirtIOVersion="${latest_fields[0]:-}"
+  CurrentVirtIORelease="${latest_fields[1]:-}"
+  CurrentQEMUGAVersion="${latest_fields[2]:-}"
+  CurrentQEMUGARelease="${latest_fields[3]:-}"
   stop_spinner
 
   if [[ -z "$CurrentVirtIOVersion" || -z "$CurrentQEMUGAVersion" ]]; then
@@ -307,19 +318,23 @@ function cmd_check() {
     case "$nag_status" in
       0)
         log_debug "VM $vmid: showing/refreshing nag"
-        if maybe_show_update_nag \
+        local show_rc=0
+        maybe_show_update_nag \
           "$node" "$vmid" \
           "$need_virtio" "$need_qemu_ga" \
           "$VirtIO_version" "$CurrentVirtIOVersion" \
           "$QEMU_GA_version" "$CurrentQEMUGAVersion" \
           "$CurrentVirtIORelease" "$CurrentQEMUGARelease" \
-          "$vmgenid"; then
-          nags_shown=$((nags_shown + 1))
-          vm_result+=", nag shown"
-          emit_event "nag.shown" "$event_payload" >/dev/null
-        else
-          vm_result+=", nag failed"
-        fi
+          "$vmgenid" || show_rc=$?
+        case "$show_rc" in
+          0)
+            nags_shown=$((nags_shown + 1))
+            vm_result+=", nag shown"
+            emit_event "nag.shown" "$event_payload" >/dev/null
+            ;;
+          2) ;;  # up to date, no nag needed
+          *) vm_result+=", nag failed" ;;
+        esac
         ;;
       1)
         # No nag action needed, but persist state so LAST_CHECKED is
@@ -330,11 +345,13 @@ function cmd_check() {
         if remove_vm_nag "$node" "$vmid"; then
           nags_removed=$((nags_removed + 1))
           vm_result+=", nag removed"
+          save_vm_state "$vmid" "$VirtIO_version" "$QEMU_GA_version" "false" "$vmgenid" "$status"
+          emit_event "nag.removed" "$event_payload" >/dev/null
         else
+          # Keep NAG_ACTIVE=true so the removal is retried on the next run.
           vm_result+=", nag remove failed"
+          save_vm_state "$vmid" "$VirtIO_version" "$QEMU_GA_version" "true" "$vmgenid" "$status"
         fi
-        save_vm_state "$vmid" "$VirtIO_version" "$QEMU_GA_version" "false" "$vmgenid" "$status"
-        emit_event "nag.removed" "$event_payload" >/dev/null
         ;;
       *)
         log_warn "Unknown nag_status='$nag_status' for VM $vmid; saving state without nag."
@@ -694,15 +711,19 @@ function cmd_cleanup() {
   [[ "$DRY_RUN" == true ]] || acquire_run_lock
 
   local vms_with_nag
-  if ! vms_with_nag=$(list_vms_with_nag); then
+  if ! vms_with_nag=$(list_vms_with_nag "${TARGET_VMIDS[@]}"); then
     echo "ERROR: could not read cluster resources (is this a Proxmox VE node?)" >&2
     exit 1
   fi
 
-  local removed=0 failed=0 vmid node failed_vmids=""
-  while read -r vmid node; do
+  local removed=0 failed=0 vmid node state failed_vmids=""
+  while read -r vmid node state; do
     [[ -z "$vmid" ]] && continue
-    if [[ ${#TARGET_VMIDS[@]} -gt 0 && " ${TARGET_VMIDS[*]} " != *" $vmid "* ]]; then
+    if [[ "$state" == "unreadable" ]]; then
+      # Banner state unknown: count as failed and keep its image (no broken image).
+      echo "Could not read config of VM $vmid (node $node), banner not checked" >&2
+      failed=$((failed + 1))
+      failed_vmids+=" $vmid"
       continue
     fi
     if [[ "$DRY_RUN" == true ]]; then
@@ -732,7 +753,7 @@ function cmd_cleanup() {
   fi
 
   if [[ "$DRY_RUN" == true ]]; then
-    echo "Dry run: $removed banner(s) and $svg_count image(s) would be removed."
+    echo "Dry run: $removed banner(s) and $svg_count image(s) would be removed, $failed VM(s) could not be checked."
   else
     echo "Cleanup done: $removed banner(s) removed, $svg_count image(s) deleted, $failed failed."
     log_info "Cleanup: $removed banner(s) removed, $svg_count image(s) deleted, $failed failed"

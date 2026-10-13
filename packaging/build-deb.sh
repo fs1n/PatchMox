@@ -15,7 +15,20 @@ if ! command -v nfpm >/dev/null 2>&1; then
 fi
 
 if [[ -z "${VERSION:-}" ]]; then
-    VERSION="$(git describe --tags --always 2>/dev/null || echo 0.0.0)"
+    # Must be a valid Debian version that sorts correctly:
+    #   tag v1.2.3            -> 1.2.3
+    #   3 commits after it    -> 1.2.3+git3.gabc1234   (newer than 1.2.3)
+    #   no tag yet            -> 0.0.0+git.abc1234      (not a bare hash)
+    if desc="$(git describe --tags --match 'v[0-9]*' 2>/dev/null)"; then
+        desc="${desc#v}"
+        if [[ "$desc" =~ ^(.+)-([0-9]+)-(g[0-9a-f]+)$ ]]; then
+            VERSION="${BASH_REMATCH[1]}+git${BASH_REMATCH[2]}.${BASH_REMATCH[3]}"
+        else
+            VERSION="$desc"
+        fi
+    else
+        VERSION="0.0.0+git.$(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
+    fi
 fi
 export VERSION="${VERSION#v}"
 

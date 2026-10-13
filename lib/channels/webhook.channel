@@ -22,16 +22,24 @@
 #   }
 
 # @function _webhook_redact_url
-# @description Returns scheme://host of a URL so tokens in path/query never reach the logs.
+# @description Returns scheme://host of a URL so credentials (user:pass@) and
+#              tokens in path/query never reach the logs.
 function _webhook_redact_url() {
     local url="${1-}"
-    echo "$url" | sed -E 's#^([a-zA-Z][a-zA-Z0-9+.-]*://[^/?]+).*#\1#'
+    local scheme="" rest="$url"
+    if [[ "$url" =~ ^([a-zA-Z][a-zA-Z0-9+.-]*://)(.*)$ ]]; then
+        scheme="${BASH_REMATCH[1]}"
+        rest="${BASH_REMATCH[2]}"
+    fi
+    rest="${rest%%[/?#]*}"   # authority only
+    rest="${rest##*@}"       # drop userinfo
+    printf '%s%s\n' "$scheme" "$rest"
 }
 
 # @function channel_send_webhook
 # @description Sends notification as JSON via HTTP to the configured webhook endpoint.
 # @args subject body [content_type] [event_json]
-# @returns 0 on success (or when not configured), 1 on error
+# @returns 0 on success, 1 on error (including WEBHOOK_URL not set)
 function channel_send_webhook() {
     local subject=${1-}
     local body=${2-}

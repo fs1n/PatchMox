@@ -94,13 +94,13 @@ function build_svg_qemu_ga_update_nag() {
 # @function _prepend_update_nag
 # @description pve_edit_vm_description callback: puts the banner of $NAG_VMID on top.
 # @args description (string)
-# @returns new description on stdout; 1 if the banner is already present
+# @returns new description on stdout; 3 if the banner is already present
 function _prepend_update_nag() {
     local description="$1"
     local update_banner='<img src="/pve2/images/update-'"$NAG_VMID"'.svg" alt="VirtIO Update" />'
     if [[ "$description" == *"update-$NAG_VMID.svg"* ]]; then
         log_debug "Update banner already present in VM $NAG_VMID"
-        return 1
+        return 3
     fi
     if [[ -z "$description" ]]; then
         echo "$update_banner"
@@ -125,6 +125,7 @@ function update_vm_description_with_update_nag() {
 
 # @function maybe_show_update_nag
 # @description Orchestrates SVG nag creation, VM description updates, and state persistence based on update availability
+# @returns 0 if the nag is shown, 1 if showing it failed, 2 if no update is needed
 function maybe_show_update_nag() {
   local node="$1" vmid="$2"
   local need_virtio="$3" need_qemu_ga="$4"
@@ -133,44 +134,32 @@ function maybe_show_update_nag() {
   local current_virtio_rel="$9" current_qemu_rel="${10}"
   local vmgenid="${11}"
 
-  local nag_shown=false
+  local nag_shown=false rendered=false
 
   if [[ "$need_virtio" == true && "$need_qemu_ga" == true ]]; then
-    if build_svg_update_nag \
-      "$vmid" \
+    build_svg_update_nag "$vmid" \
       "$virtio_ver" "$current_virtio" \
       "$qemu_ver" "$current_qemu" \
-      "$current_virtio_rel" "$current_qemu_rel"; then
-      update_vm_description_with_update_nag "$node" "$vmid" "$need_virtio" "$need_qemu_ga" && nag_shown=true
-    else
-      log_error "VM $vmid: could not render banner image in ${SVG_IMAGE_PATH}, banner not set"
-    fi
-    save_vm_state "$vmid" "$virtio_ver" "$qemu_ver" "$nag_shown" "$vmgenid" "running"
-
+      "$current_virtio_rel" "$current_qemu_rel" && rendered=true
   elif [[ "$need_virtio" == true ]]; then
-    if build_svg_virtio_update_nag \
-      "$vmid" \
-      "$virtio_ver" "$current_virtio" "$current_virtio_rel"; then
-      update_vm_description_with_update_nag "$node" "$vmid" "$need_virtio" "$need_qemu_ga" && nag_shown=true
-    else
-      log_error "VM $vmid: could not render banner image in ${SVG_IMAGE_PATH}, banner not set"
-    fi
-    save_vm_state "$vmid" "$virtio_ver" "$qemu_ver" "$nag_shown" "$vmgenid" "running"
-
+    build_svg_virtio_update_nag "$vmid" \
+      "$virtio_ver" "$current_virtio" "$current_virtio_rel" && rendered=true
   elif [[ "$need_qemu_ga" == true ]]; then
-    if build_svg_qemu_ga_update_nag \
-      "$vmid" \
-      "$qemu_ver" "$current_qemu" "$current_qemu_rel"; then
-      update_vm_description_with_update_nag "$node" "$vmid" "$need_virtio" "$need_qemu_ga" && nag_shown=true
-    else
-      log_error "VM $vmid: could not render banner image in ${SVG_IMAGE_PATH}, banner not set"
-    fi
-    save_vm_state "$vmid" "$virtio_ver" "$qemu_ver" "$nag_shown" "$vmgenid" "running"
-
+    build_svg_qemu_ga_update_nag "$vmid" \
+      "$qemu_ver" "$current_qemu" "$current_qemu_rel" && rendered=true
   else
-    log_warn "nag_status=0 but neither VirtIO nor QEMU GA update is needed for VM $vmid; saving state without nag."
+    # First run / new vmgenid for an up-to-date VM: nothing to show.
+    log_debug "VM $vmid: no update needed, saving state without nag"
     save_vm_state "$vmid" "$virtio_ver" "$qemu_ver" "false" "$vmgenid" "running"
+    return 2
   fi
+
+  if [[ "$rendered" == true ]]; then
+    update_vm_description_with_update_nag "$node" "$vmid" && nag_shown=true
+  else
+    log_error "VM $vmid: could not render banner image in ${SVG_IMAGE_PATH}, banner not set"
+  fi
+  save_vm_state "$vmid" "$virtio_ver" "$qemu_ver" "$nag_shown" "$vmgenid" "running"
 
   if [[ "$nag_shown" == true ]]; then
     log_info "Nag shown for VM $vmid (VirtIO: $virtio_ver → $current_virtio, QEMU-GA: $qemu_ver → $current_qemu)"

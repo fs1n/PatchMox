@@ -13,15 +13,22 @@
 # @function _strip_update_nag
 # @description pve_edit_vm_description callback: removes the banner of $NAG_VMID.
 # @args description (string)
-# @returns new description on stdout; 1 if no banner present
+# @returns new description on stdout; 3 if no banner present; 1 if the banner
+#          markup is not recognized (it would stay in the description)
 function _strip_update_nag() {
     local description="$1"
     if [[ "$description" != *"update-$NAG_VMID.svg"* ]]; then
+        return 3
+    fi
+    local stripped
+    stripped=$(echo "$description" \
+        | sed -E "s|(<a[^>]*>)?<img src=\"/pve2/images/update-$NAG_VMID\.svg\"[^>]*/>(</a>)?(<hr/>)?||g" \
+        | sed -E 's|<hr/>(<hr/>)+|<hr/>|g' | sed -E 's|^<hr/>||' | sed -E 's|<hr/>$||') || return 1
+    if [[ "$stripped" == *"update-$NAG_VMID.svg"* ]]; then
+        log_warn "VM $NAG_VMID: banner markup in description not recognized, remove it manually"
         return 1
     fi
-    echo "$description" \
-        | sed -E "s|(<a[^>]*>)?<img src=\"/pve2/images/update-$NAG_VMID\.svg\"[^>]*/>(</a>)?(<hr/>)?||g" \
-        | sed -E 's|<hr/>(<hr/>)+|<hr/>|g' | sed -E 's|^<hr/>||' | sed -E 's|<hr/>$||'
+    printf '%s\n' "$stripped"
 }
 
 # @function remove_vm_nag
@@ -44,7 +51,10 @@ function remove_vm_nag() {
 # @function list_vms_with_nag
 # @description Lists all QEMU VMs in the cluster (any status, templates included)
 #              whose description contains a PatchMox update banner.
-# @returns "vmid node" lines on stdout; 1 if cluster resources cannot be read
+# @args [vmid...] (optional): only look at these VMs (all VMs when omitted)
+# @returns "vmid node" lines for VMs with a banner and "vmid node unreadable"
+#          lines for VMs whose config could not be read (banner state unknown);
+#          1 if cluster resources cannot be read
 function list_vms_with_nag() {
     local resources
     if ! resources=$(pve_api get /cluster/resources --type vm) || [[ -z "$resources" ]]; then
@@ -52,14 +62,24 @@ function list_vms_with_nag() {
         return 1
     fi
 
-    local vmid node description
+    local ids_json
+    ids_json=$(printf '%s\n' "$@" | jq -R 'select(length > 0)' | jq -s .)
+
+    local vmid node config description
     while read -r vmid node; do
         [[ -z "$vmid" ]] && continue
-        description=$(pve_get_vm_config "$node" "$vmid" | jq -r '.description // empty' 2>/dev/null) || description=""
+        if ! config=$(pve_get_vm_config "$node" "$vmid"); then
+            echo "$vmid $node unreadable"
+            continue
+        fi
+        description=$(jq -r '.description // empty' <<< "$config" 2>/dev/null) || description=""
         if [[ "$description" == *"update-$vmid.svg"* ]]; then
             echo "$vmid $node"
         fi
-    done < <(jq -r '.[] | select(.type == "qemu") | "\(.vmid) \(.node)"' <<< "$resources")
+    done < <(jq -r --argjson ids "$ids_json" '
+        .[] | select(.type == "qemu")
+            | select(($ids | length) == 0 or ((.vmid | tostring) as $v | $ids | index($v)) != null)
+            | "\(.vmid) \(.node)"' <<< "$resources")
 }
 
 # @function remove_nag_svg_files

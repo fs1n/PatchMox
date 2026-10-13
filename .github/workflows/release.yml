@@ -29,12 +29,19 @@ jobs:
 
       - name: Determine version
         id: version
+        env:
+          INPUT_VERSION: ${{ inputs.version }}
         run: |
-          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
-            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          if [[ "${GITHUB_EVENT_NAME}" == "push" && "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            version="${GITHUB_REF_NAME#v}"
           else
-            echo "version=${{ inputs.version }}" >> "$GITHUB_OUTPUT"
+            version="${INPUT_VERSION}"
           fi
+          if [[ ! "$version" =~ ^[0-9][A-Za-z0-9.+~-]*$ ]]; then
+            echo "Invalid package version: '$version'" >&2
+            exit 1
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - name: Syntax check
         run: |
@@ -58,7 +65,7 @@ jobs:
           path: dist/*.deb
 
       - name: Publish GitHub release
-        if: github.ref_type == 'tag'
+        if: github.event_name == 'push' && github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           files: dist/*.deb

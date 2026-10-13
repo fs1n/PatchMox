@@ -235,24 +235,22 @@ function _fetch_remote_qemu_ga_version() {
     echo "$latest_json"
 }
 
-# @function fetch_latest_virtio_version
-# @description Returns the latest VirtIO version, using the cache if valid.
-# @returns JSON object with keys: version, release; 1 if unknown
-function fetch_latest_virtio_version() {
+# @function fetch_latest_versions
+# @description Returns the latest VirtIO and QEMU GA versions, using the cache if
+#              valid. Checks / refreshes the shared cache only once per call.
+# @returns JSON object {virtio: {version, release}, qemu_ga: {version, release}};
+#          1 if the versions are unknown
+function fetch_latest_versions() {
     if ! _version_cache_is_valid; then
         _refresh_version_cache || return 1
     fi
-    _read_version_cache | jq -c '.virtio'
-}
-
-# @function fetch_latest_qemu_ga_version
-# @description Returns the latest QEMU GA version, using the cache if valid.
-# @returns JSON object with keys: version, release; 1 if unknown
-function fetch_latest_qemu_ga_version() {
-    if ! _version_cache_is_valid; then
-        _refresh_version_cache || return 1
-    fi
-    _read_version_cache | jq -c '.qemu_ga'
+    local cache
+    cache=$(_read_version_cache) || return 1
+    jq -e '(.virtio.version // "" | length > 0) and (.qemu_ga.version // "" | length > 0)' >/dev/null 2>&1 <<< "$cache" || {
+        log_error "Version cache contains no usable versions"
+        return 1
+    }
+    jq -c '{virtio, qemu_ga}' <<< "$cache"
 }
 
 # @function get_windows_vms
@@ -377,7 +375,9 @@ function get_windows_virtio_version() {
     local node=$1
     local vmid=$2
     log_debug "Querying VirtIO version via guest agent for VM $vmid on $node"
-    local script='Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "*virtio*installer*" } | Select-Object -ExpandProperty DisplayVersion -First 1'
+    # `exit 0`: a suppressed non-terminating error (unreadable registry value,
+    # missing WOW6432Node) would otherwise make powershell exit 1 and the VM be skipped.
+    local script='Get-ItemProperty "HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*", "HKLM:\Software\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*" -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName -like "*virtio*installer*" } | Select-Object -ExpandProperty DisplayVersion -First 1; exit 0'
     local raw_version
     raw_version=$(pve_guest_powershell "$node" "$vmid" "$script") || return 1
     local sanitized
@@ -395,7 +395,7 @@ function get_windows_QEMU_GA_version() {
     local node=$1
     local vmid=$2
     log_debug "Querying QEMU GA version via guest agent for VM $vmid on $node"
-    local script='foreach ($path in @("C:\Program Files\Qemu-ga\qemu-ga.exe", "C:\Program Files (x86)\Qemu-ga\qemu-ga.exe")) { if (Test-Path $path) { (Get-Item $path).VersionInfo.FileVersion; break } }'
+    local script='foreach ($path in @("C:\Program Files\Qemu-ga\qemu-ga.exe", "C:\Program Files (x86)\Qemu-ga\qemu-ga.exe")) { if (Test-Path $path) { (Get-Item $path).VersionInfo.FileVersion; break } }; exit 0'
     local raw_version
     raw_version=$(pve_guest_powershell "$node" "$vmid" "$script") || return 1
     local sanitized

@@ -54,7 +54,8 @@ function pve_api() {
     fi
 
     local out rc=0 started=$SECONDS
-    out=$(timeout "$PVE_API_TIMEOUT" pvesh "$method" "$path" "$@" --output-format json 2>"$err_file") || rc=$?
+    # --foreground: keep pvesh in the terminal's process group so Ctrl-C reaches it
+    out=$(timeout --foreground "$PVE_API_TIMEOUT" pvesh "$method" "$path" "$@" --output-format json 2>"$err_file") || rc=$?
     local err
     err=$(tr '\n' ' ' < "$err_file" | sed -e 's/[[:space:]]*$//')
     rm -f "$err_file"
@@ -197,17 +198,25 @@ function pve_set_vm_config() {
 #              digest. If someone else changed the config in between, Proxmox
 #              rejects the write and the edit is retried with the fresh config.
 # @args node, vmid, callback — callback gets the current description as $1 and
-#       prints the new one; callback exit 1 = no change needed
+#       prints the new one; callback exit 3 = no change needed, any other
+#       non-zero exit = error (the description is left unchanged)
 # @returns 0 on success or if nothing changed, 1 on error
 function pve_edit_vm_description() {
     local node="$1" vmid="$2" callback="$3"
-    local attempt config digest current new
+    local attempt config digest current new cb_rc
     for attempt in 1 2 3; do
         config=$(pve_get_vm_config "$node" "$vmid") || return 1
         digest=$(jq -r '.digest // empty' <<< "$config")
         current=$(jq -r '.description // empty' <<< "$config")
 
-        new=$("$callback" "$current") || return 0
+        cb_rc=0
+        new=$("$callback" "$current") || cb_rc=$?
+        if [[ $cb_rc -eq 3 ]]; then
+            return 0
+        elif [[ $cb_rc -ne 0 ]]; then
+            log_error "VM $vmid: description edit failed ($callback exit $cb_rc)"
+            return 1
+        fi
         if [[ "$new" == "$current" ]]; then
             return 0
         fi
@@ -278,7 +287,9 @@ function pve_guest_exec() {
     signal=$(jq -r '.signal // empty' <<< "$status_json")
     err_data=$(jq -r '."err-data" // empty' <<< "$status_json" | tr '\r\n' '  ')
 
-    if [[ "$(jq -r '."out-truncated" // 0' <<< "$status_json")" == "1" ]]; then
+    local truncated
+    truncated=$(jq -r '."out-truncated" // 0' <<< "$status_json")
+    if [[ "$truncated" == "1" || "$truncated" == "true" ]]; then
         log_warn "VM $vmid: guest command output was truncated by the agent"
     fi
 

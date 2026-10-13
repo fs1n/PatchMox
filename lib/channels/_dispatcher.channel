@@ -13,6 +13,7 @@
 # @description Dispatches update notifications to all enabled channels.
 # @args subject body [content_type] [event_json]
 #       event_json is the canonical event (if any); the webhook channel forwards it.
+# @returns 0 if every channel succeeded, 1 if any channel failed or is unknown
 function notification_send() {
     local subject=${1-}
     local body=${2-}
@@ -26,16 +27,19 @@ function notification_send() {
 
     log_debug "Dispatching notification to channels: $NOTIFICATION_CHANNELS (subject: $subject)"
 
-    local IFS=','
-    read -ra CHANNELS <<< "$NOTIFICATION_CHANNELS"
-    for channel in "${CHANNELS[@]}"; do
-        local trimmed_channel="${channel## }"
-        trimmed_channel="${trimmed_channel%% }"
+    local rc=0 channel trimmed_channel
+    local -a channels
+    IFS=',' read -ra channels <<< "$NOTIFICATION_CHANNELS"
+    for channel in "${channels[@]}"; do
+        trimmed_channel="${channel#"${channel%%[![:space:]]*}"}"
+        trimmed_channel="${trimmed_channel%"${trimmed_channel##*[![:space:]]}"}"
+        [[ -z "$trimmed_channel" ]] && continue
         case "$trimmed_channel" in
-            smtp) channel_send_smtp "$subject" "$body" "$content_type" ;;
-            msgraph) channel_send_msgraph "$subject" "$body" "$content_type" ;;
-            webhook) channel_send_webhook "$subject" "$body" "$content_type" "$event_json" ;;
-            *) log_warn "Unknown notification channel: $trimmed_channel" ;;
+            smtp) channel_send_smtp "$subject" "$body" "$content_type" || rc=1 ;;
+            msgraph) channel_send_msgraph "$subject" "$body" "$content_type" || rc=1 ;;
+            webhook) channel_send_webhook "$subject" "$body" "$content_type" "$event_json" || rc=1 ;;
+            *) log_error "Unknown notification channel: $trimmed_channel"; rc=1 ;;
         esac
     done
+    return "$rc"
 }
