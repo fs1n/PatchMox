@@ -31,7 +31,7 @@ DAGs solve **execution-order complexity** (e.g. step B needs A and C, D needs B,
 detect → decide → notify → optionally act
 ```
 
-The real complexity is **conditional branching** (maintenance window, VM tags, risk class, cluster vs. single node). A DAG tool like Dagu forces you to express conditionals as graph edges and adds a database, UI, and upgrade surface you do not need. If Bash is ever outgrown, prefer a single static binary workflow engine or a small SQLite-backed job queue — not today.
+The real complexity is **conditional branching** (maintenance window, VM tags, risk class, cluster vs. single node). A DAG tool like Dagu forces you to express conditionals as graph edges and adds a database, UI, and upgrade surface you do not need. If Bash is ever outgrown, prefer a single static binary workflow engine or a small SQLite-backed job queue - not today.
 
 ## Module layout
 
@@ -157,7 +157,7 @@ Default decision if no policy matches:
 
 ## Performance: guest-agent cache and concurrency
 
-The slow part is not the orchestrator CPU; it is the **per-VM guest-agent round-trip** (`qm guest exec`). Two complementary tools address this.
+The slow part is not the orchestrator CPU; it is the **per-VM guest-agent round-trip** (`agent/exec` via the API). Two complementary tools address this.
 
 ### Guest-agent cache (first)
 
@@ -238,10 +238,10 @@ The worker:
 
 A policy with `action: auto-update` is **not** "execute immediately". It still passes through gates:
 
-1. **Maintenance window** — is now inside the allowed window?
-2. **Safety gate** — VM running? guest-agent responsive? required snapshot present?
-3. **Rate gate** — does the number of currently running updates for this node/cluster exceed `max_concurrent`?
-4. **Retry gate** — has this job already failed too many times?
+1. **Maintenance window** - is now inside the allowed window?
+2. **Safety gate** - VM running? guest-agent responsive? required snapshot present?
+3. **Rate gate** - does the number of currently running updates for this node/cluster exceed `max_concurrent`?
+4. **Retry gate** - has this job already failed too many times?
 
 If a gate rejects execution, the job stays in `pending/` with `next_attempt_at` set to the next maintenance window or backoff interval.
 
@@ -249,8 +249,8 @@ If a gate rejects execution, the job stays in `pending/` with `next_attempt_at` 
 
 PatchMox keeps two kinds of durable state:
 
-- `.state/vm-${vmid}.state` — small per-VM cache (vmgenid, last seen versions, nag status).
-- `queue/{pending,claimed,running,done,failed}/${job_id}.json` — durable record of every action the worker took. This is the audit trail for auto-updates.
+- `.state/vm-${vmid}.state` - small per-VM cache (vmgenid, last seen versions, nag status).
+- `queue/{pending,claimed,running,done,failed}/${job_id}.json` - durable record of every action the worker took. This is the audit trail for auto-updates.
 
 Events are emitted as JSON to stdout for real-time consumers (actions, channels, worker) but are not persisted to a separate event journal. The queue files are the source of truth for "what happened and when".
 
@@ -327,7 +327,7 @@ Update the top-of-file comment in every `.sh` and `.func` file:
 
 ## Implementation roadmap
 
-### Phase 1 — Core engine and rename ✅
+### Phase 1 - Core engine and rename ✅
 
 1. Define the canonical event JSON schema.
 2. Introduce `lib/core/events.func` and convert `check-vm-updates.sh` to emit events instead of mutating state directly.
@@ -336,7 +336,7 @@ Update the top-of-file comment in every `.sh` and `.func` file:
 5. Split detection from action: `patchmox check` enqueues, `patchmox worker` executes.
 6. Rename project strings, CLI entrypoint, systemd names, journal tag, and default paths to PatchMox.
 
-### Phase 2 — Modules ✅
+### Phase 2 - Modules ✅
 
 7. Move current VirtIO/QEMU-GA logic into `sources/virtio.source`.
 8. Move SVG/description mutation into `actions/show-nag.action` and `actions/remove-nag.action`.
@@ -344,7 +344,7 @@ Update the top-of-file comment in every `.sh` and `.func` file:
 10. Create `enqueue-update.action` that writes jobs to `queue/pending/` based on policy decisions.
 11. Create `apply-update.action` as a stub that logs the trigger; wire it into the worker.
 
-### Phase 3 — CLI, packaging, and runtime polish ✅
+### Phase 3 - CLI, packaging, and runtime polish ✅
 
 12. Create `bin/patchmox` with subcommands `check`, `notify`, `worker`, `apply`, `policy`, `state`. ✅
 13. Add systemd service/timer templates for `patchmox-check` and `patchmox-worker`. *(user wants to do themselves)*
@@ -352,7 +352,7 @@ Update the top-of-file comment in every `.sh` and `.func` file:
 15. Write `docs/` and rewrite `README.md` as a concise entry point. ✅
 16. Implement guest-agent per-VM cache so unchanged VMs are skipped on subsequent checks. ✅
 
-### Phase 4 — Performance and scale
+### Phase 4 - Performance and scale
 
 17. Evaluate and implement optional `--max-node-concurrency=N` for large clusters, after guest-agent cache is in place.
 18. Harden worker retry/backoff and maintenance-window enforcement.
@@ -373,7 +373,7 @@ Update the top-of-file comment in every `.sh` and `.func` file:
 
 ### Offline driver push
 
-For VMs without guest internet access, PatchMox could download the VirtIO/QEMU-GA ISO on the host and attach it to the VM as a virtual CD-ROM via `qm set <vmid> -ide2 ...`. `qm guest exec` could then run the bundled installer (`virtio-win-guest-tools.exe` or `msiexec /i ...`) inside the VM. Reboot would be handled by the worker. This needs careful design around ISO lifecycle, reboot coordination, and first-install bootstrapping (when QEMU Guest Agent is not yet present).
+For VMs without guest internet access, PatchMox could download the VirtIO/QEMU-GA ISO on the host and attach it to the VM as a virtual CD-ROM via the API (`pvesh set /nodes/<node>/qemu/<vmid>/config --ide2 ...`). `agent/exec` could then run the bundled installer (`virtio-win-guest-tools.exe` or `msiexec /i ...`) inside the VM. Reboot would be handled by the worker. This needs careful design around ISO lifecycle, reboot coordination, and first-install bootstrapping (when QEMU Guest Agent is not yet present).
 
 ### Windows Updates and template freshness
 

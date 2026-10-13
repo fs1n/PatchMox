@@ -7,32 +7,58 @@
 # Date: 2026-07-15
 #
 # Dependencies: jq
-# Environment: SCRIPT_DIR, POLICY_DIR
+# Environment: SCRIPT_DIR, POLICY_DIR, POLICY_LOCAL_DIR
 # Usage: source lib/core/policy.func; load_policies; evaluate_policy "$event_json"
 
 POLICY_DIR="${POLICY_DIR:-${SCRIPT_DIR}/policies}"
+# Optional admin policies (package: /etc/patchmox/policies.d). A file here
+# replaces a built-in policy with the same name.
+POLICY_LOCAL_DIR="${POLICY_LOCAL_DIR:-}"
 PATCHMOX_POLICIES=()
 
 # @function load_policies
-# @description Loads all .policy files from POLICY_DIR in alphabetical order.
-# @returns 0 on success, 1 on failure
+# @description Loads all .policy files from POLICY_DIR and POLICY_LOCAL_DIR,
+#              ordered by file name. A local file overrides a built-in file
+#              with the same name.
+# @returns 0 on success, 1 if no policy directory exists
 function load_policies() {
     PATCHMOX_POLICIES=()
-    if [[ ! -d "$POLICY_DIR" ]]; then
+    local -A policy_by_name=()
+    local dir found_dir=false policy_file
+
+    for dir in "$POLICY_DIR" "$POLICY_LOCAL_DIR"; do
+        [[ -z "$dir" ]] && continue
+        if [[ ! -d "$dir" ]]; then
+            log_debug "Policy directory not found, skipping: $dir"
+            continue
+        fi
+        found_dir=true
+        while IFS= read -r -d '' policy_file; do
+            policy_by_name["$(basename "$policy_file")"]="$policy_file"
+        done < <(find "$dir" -maxdepth 1 -type f -name '*.policy' -print0)
+    done
+
+    if [[ "$found_dir" == false ]]; then
         log_warn "Policy directory not found: $POLICY_DIR"
         return 1
     fi
 
-    local policy_file
-    while IFS= read -r -d '' policy_file; do
+    if [[ ${#policy_by_name[@]} -eq 0 ]]; then
+        log_debug "No policy files found"
+        return 0
+    fi
+
+    local name
+    while IFS= read -r -d '' name; do
+        policy_file="${policy_by_name[$name]}"
         if jq empty "$policy_file" 2>/dev/null; then
             PATCHMOX_POLICIES+=("$policy_file")
         else
             log_warn "Invalid JSON policy file, skipping: $policy_file"
         fi
-    done < <(find "$POLICY_DIR" -maxdepth 1 -type f -name '*.policy' -print0 | sort -z)
+    done < <(printf '%s\0' "${!policy_by_name[@]}" | sort -z)
 
-    log_debug "Loaded ${#PATCHMOX_POLICIES[@]} policy file(s) from $POLICY_DIR"
+    log_debug "Loaded ${#PATCHMOX_POLICIES[@]} policy file(s) from $POLICY_DIR${POLICY_LOCAL_DIR:+ and $POLICY_LOCAL_DIR}"
 }
 
 # @function _policy_matches_event

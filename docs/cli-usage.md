@@ -4,11 +4,13 @@ PatchMox has one entry point: `bin/patchmox`.
 
 ```bash
 patchmox check [--vmid ID] [--force-refresh]
-patchmox notify [--channel smtp]
+patchmox notify [--test] [--channel smtp|webhook]
 patchmox worker [--once] [--max-jobs N] [--daemon]
 patchmox apply --vmid ID [--component virtio|qemu-ga]
 patchmox policy --dry-run [--vmid ID]
 patchmox state --vmid ID
+patchmox cleanup [--dry-run] [--vmid ID]
+patchmox version
 patchmox help
 ```
 
@@ -49,14 +51,17 @@ patchmox worker --daemon
 Sends notifications through the configured channels (`NOTIFICATION_CHANNELS`).
 
 ```bash
-# Send a test email to verify SMTP settings
+# Send a test notification through all configured channels
 patchmox notify --test
+
+# Test only the webhook channel
+patchmox notify --test --channel webhook
 
 # Send a summary of currently active update nags
 patchmox notify
 ```
 
-The summary includes all VMs where the SVG nag is currently active. SMTP settings are read from `.env`.
+The summary includes all VMs where the SVG nag is currently active. Channel settings are read from the config file (`.env` or `/etc/patchmox/patchmox.env`).
 
 ## `patchmox apply`
 
@@ -81,3 +86,30 @@ Show persisted state for a VM.
 ```bash
 patchmox state --vmid 100
 ```
+
+## `patchmox cleanup`
+
+Removes everything PatchMox put into Proxmox: the update banner in every VM description (all nodes, running and stopped VMs, also old clickable banners from the removed webhook integration) and the rendered `update-<vmid>.svg` images on this node. Other description text is kept. The stored state is marked as "no banner".
+
+```bash
+# Show what would be removed
+patchmox cleanup --dry-run
+
+# Remove all banners
+patchmox cleanup
+
+# Only one VM
+patchmox cleanup --vmid 100
+```
+
+The Debian package runs `patchmox cleanup` automatically on `apt remove`. On a cluster, banner images live on the node that ran PatchMox; run `cleanup` there (descriptions are cleaned cluster-wide from any node).
+
+Note: the next `patchmox check` shows banners again for VMs that still need updates - stop the timer first if you want them gone for good.
+
+## `patchmox version`
+
+Prints the installed version.
+
+## Shell completion
+
+Bash completion for commands, options and VM IDs is installed with the Debian package (`/usr/share/bash-completion/completions/patchmox`) and by `install.sh` (`/etc/bash_completion.d/patchmox`). It is active in new shells. VM IDs after `--vmid` come from the cluster VM list `/etc/pve/.vmlist` (QEMU VMs only), so completion needs no API call.

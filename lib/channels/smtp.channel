@@ -102,6 +102,7 @@ EOF
     )
 
     if curl --silent --show-error \
+        --connect-timeout 15 --max-time "${SMTP_TIMEOUT:-60}" \
         --url "${protocol}://${SMTP_HOST}:${smtp_port}" \
         "${tls_flag[@]}" \
         "${auth_flag[@]}" \

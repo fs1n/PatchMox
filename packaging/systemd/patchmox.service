@@ -1,0 +1,10 @@
+[Unit]
+Description=PatchMox VirtIO / QEMU Guest Agent update check
+Documentation=https://github.com/fs1n/PatchMox
+After=network-online.target pve-cluster.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=PATCHMOX_NO_PROGRESS=1
+ExecStart=/usr/bin/patchmox check

@@ -1,0 +1,96 @@
+# nfpm config for the PatchMox Debian package.
+# Build locally:  packaging/build-deb.sh            (version from git describe)
+#                 VERSION=1.2.3 packaging/build-deb.sh
+# Docs: https://nfpm.goreleaser.com/configuration/
+#
+# Layout:
+#   /usr/share/patchmox/              code, built-in policies, defaults.env, VERSION
+#   /usr/bin/patchmox                 -> /usr/share/patchmox/bin/patchmox
+#   /etc/patchmox/patchmox.env        config (conffile, kept on upgrade)
+#   /etc/patchmox/policies.d/         admin policies (override built-ins by name)
+#   /var/lib/patchmox/                state + queue
+#   /var/log/patchmox/                logs
+# Paths are set in packaging/defaults.env.
+
+name: patchmox
+arch: all
+platform: linux
+version: ${VERSION}
+version_schema: semver
+section: admin
+priority: optional
+maintainer: Frederik S. (fs1n) <frederik.sinniger@gmail.com>
+description: |
+  VirtIO driver and QEMU Guest Agent update orchestrator for Proxmox VE.
+  Detects outdated VirtIO / QEMU GA versions in Windows VMs, shows update
+  banners in the Proxmox UI and sends notifications (SMTP, webhook).
+vendor: PatchMox
+homepage: https://github.com/fs1n/PatchMox
+license: MIT
+
+depends:
+  - bash
+  - jq
+  - curl
+  - pve-manager
+
+contents:
+  # Code
+  - src: ./bin/patchmox
+    dst: /usr/share/patchmox/bin/patchmox
+    file_info: { mode: 0755 }
+  - src: ./lib
+    dst: /usr/share/patchmox/lib
+    type: tree
+  - src: ./templates
+    dst: /usr/share/patchmox/templates
+    type: tree
+  - src: ./policies
+    dst: /usr/share/patchmox/policies
+    type: tree
+  - src: ./packaging/defaults.env
+    dst: /usr/share/patchmox/defaults.env
+  - src: ./build/VERSION
+    dst: /usr/share/patchmox/VERSION
+
+  # CLI
+  - src: /usr/share/patchmox/bin/patchmox
+    dst: /usr/bin/patchmox
+    type: symlink
+
+  # Config (conffiles: never overwritten on upgrade if changed by the admin)
+  - src: ./.env.example
+    dst: /etc/patchmox/patchmox.env
+    type: config|noreplace
+    file_info: { mode: 0640 }
+  - dst: /etc/patchmox/policies.d
+    type: dir
+
+  # systemd
+  - src: ./packaging/systemd/patchmox.service
+    dst: /lib/systemd/system/patchmox.service
+  - src: ./packaging/systemd/patchmox.timer
+    dst: /lib/systemd/system/patchmox.timer
+
+  # Shell completion
+  - src: ./packaging/completion/patchmox.bash
+    dst: /usr/share/bash-completion/completions/patchmox
+
+  # Docs
+  - src: ./README.md
+    dst: /usr/share/doc/patchmox/README.md
+  - src: ./LICENSE
+    dst: /usr/share/doc/patchmox/copyright
+
+  # Data directories
+  - dst: /var/lib/patchmox
+    type: dir
+    file_info: { mode: 0750 }
+  - dst: /var/log/patchmox
+    type: dir
+    file_info: { mode: 0750 }
+
+scripts:
+  postinstall: ./packaging/scripts/postinst.sh
+  preremove: ./packaging/scripts/prerm.sh
+  postremove: ./packaging/scripts/postrm.sh

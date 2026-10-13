@@ -43,18 +43,17 @@ function build_event() {
         '{event_id: $event_id, timestamp: $timestamp, type: $type, payload: $payload}'
 }
 
-# @function build_notification_body
-# @description Builds an HTML notification body from a canonical event using
-#              the email template. Falls back to plain text if template missing.
+# @function build_notification_text
+# @description Builds a plain-text notification message from a canonical event.
+#              Used as the email fallback and as the message for the webhook channel.
 # @args event_json (string): canonical PatchMox event
-# @returns HTML or plain text body on stdout
-function build_notification_body() {
+# @returns plain text body on stdout
+function build_notification_text() {
     local event_json="${1:-}"
-    local event_type vmid node components
-    event_type=$(echo "$event_json" | jq -r '.type // "unknown"')
+    local vmid node components
     vmid=$(echo "$event_json" | jq -r '.payload.vmid // "unknown"')
     node=$(echo "$event_json" | jq -r '.payload.node // "unknown"')
-    components=$(echo "$event_json" | jq -r '.payload.components | join(", ") // "none"')
+    components=$(echo "$event_json" | jq -r '(.payload.components // []) | join(", ")')
 
     local virtio_current virtio_latest qemu_current qemu_latest
     virtio_current=$(echo "$event_json" | jq -r '.payload.current.virtio // "unknown"')
@@ -62,56 +61,69 @@ function build_notification_body() {
     qemu_current=$(echo "$event_json" | jq -r '.payload.current.qemu_ga // "unknown"')
     qemu_latest=$(echo "$event_json" | jq -r '.payload.latest.qemu_ga // "unknown"')
 
+    local body="PatchMox detected available updates for VM $vmid on node $node.
+
+Components needing update: ${components:-none}
+
+"
+    if [[ "$components" == *"virtio"* ]]; then
+        body+="VirtIO Drivers: $virtio_current → $virtio_latest
+"
+    fi
+    if [[ "$components" == *"qemu-ga"* ]]; then
+        body+="QEMU Guest Agent: $qemu_current → $qemu_latest
+"
+    fi
+    body+="
+Update recommended during your next maintenance window."
+    echo "$body"
+}
+
+# @function build_notification_body
+# @description Builds an HTML notification body from a canonical event using
+#              the email template. Falls back to plain text if template missing.
+# @args event_json (string): canonical PatchMox event
+# @returns HTML or plain text body on stdout
+function build_notification_body() {
+    local event_json="${1:-}"
+    local event_type
+    event_type=$(echo "$event_json" | jq -r '.type // "unknown"')
+
     local template_file="${SCRIPT_DIR}/templates/html/email-template.html"
-    local release_date last_checked update_link
+    if [[ "$event_type" != "update.available" || ! -f "$template_file" ]]; then
+        build_notification_text "$event_json"
+        return 0
+    fi
+
+    local vmid node
+    vmid=$(echo "$event_json" | jq -r '.payload.vmid // "unknown"')
+    node=$(echo "$event_json" | jq -r '.payload.node // "unknown"')
+
+    local virtio_current virtio_latest qemu_current qemu_latest
+    virtio_current=$(echo "$event_json" | jq -r '.payload.current.virtio // "unknown"')
+    virtio_latest=$(echo "$event_json" | jq -r '.payload.latest.virtio // "unknown"')
+    qemu_current=$(echo "$event_json" | jq -r '.payload.current.qemu_ga // "unknown"')
+    qemu_latest=$(echo "$event_json" | jq -r '.payload.latest.qemu_ga // "unknown"')
+
+    local release_date last_checked
     release_date=$(echo "$event_json" | jq -r '.payload.latest.virtio_release // .payload.latest.qemu_ga_release // "unknown"')
     last_checked=$(date '+%Y-%m-%d %H:%M:%S')
 
-    # Build update link if webhook is configured
-    if [[ -n "${WEBHOOK_HOST:-}" && -n "${WEBHOOK_SECRET:-}" ]]; then
-        update_link="http://${WEBHOOK_HOST}:${WEBHOOK_PORT:-9000}/hooks/${vmid}?token=${WEBHOOK_SECRET}"
-    else
-        update_link="https://github.com/fs1n/PVE-QEMU-VirtIO-Updater"
-    fi
+    # Load and populate the HTML template
+    local template
+    template=$(cat "$template_file")
 
-    if [[ "$event_type" == "update.available" && -f "$template_file" ]]; then
-        # Load and populate the HTML template
-        local template
-        template=$(cat "$template_file")
+    template="${template//\{\{NODE_NAME\}\}/$node}"
+    template="${template//\{\{VMID\}\}/$vmid}"
+    template="${template//\{\{VM_NAME\}\}/VM $vmid}"
+    template="${template//\{\{CURRENT_VIRTIO_VERSION\}\}/$virtio_current}"
+    template="${template//\{\{LATEST_VIRTIO_VERSION\}\}/$virtio_latest}"
+    template="${template//\{\{CURRENT_QEMU_GA_VERSION\}\}/$qemu_current}"
+    template="${template//\{\{LATEST_QEMU_GA_VERSION\}\}/$qemu_latest}"
+    template="${template//\{\{RELEASE_DATE\}\}/$release_date}"
+    template="${template//\{\{LAST_CHECKED\}\}/$last_checked}"
 
-        # Replace placeholders
-        template="${template//\{\{NODE_NAME\}\}/$node}"
-        template="${template//\{\{VMID\}\}/$vmid}"
-        template="${template//\{\{VM_NAME\}\}/VM $vmid}"
-        template="${template//\{\{CURRENT_VIRTIO_VERSION\}\}/$virtio_current}"
-        template="${template//\{\{LATEST_VIRTIO_VERSION\}\}/$virtio_latest}"
-        template="${template//\{\{CURRENT_QEMU_GA_VERSION\}\}/$qemu_current}"
-        template="${template//\{\{LATEST_QEMU_GA_VERSION\}\}/$qemu_latest}"
-        template="${template//\{\{RELEASE_DATE\}\}/$release_date}"
-        template="${template//\{\{LAST_CHECKED\}\}/$last_checked}"
-        template="${template//\{\{UPDATE_LINK\}\}/$update_link}"
-
-        echo "$template"
-    else
-        # Plain text fallback
-        local body="PatchMox detected available updates for VM $vmid on node $node.
-
-Components needing update: $components
-
-"
-        if [[ "$components" == *"virtio"* ]]; then
-            body+="VirtIO Drivers: $virtio_current → $virtio_latest
-"
-        fi
-        if [[ "$components" == *"qemu-ga"* ]]; then
-            body+="QEMU Guest Agent: $qemu_current → $qemu_latest
-"
-        fi
-        body+="
-
-Update recommended during your next maintenance window."
-        echo "$body"
-    fi
+    echo "$template"
 }
 
 # @function get_notification_content_type
@@ -172,7 +184,7 @@ function dispatch_event() {
         body=$(build_notification_body "$event_json")
         content_type=$(get_notification_content_type "$event_json")
         log_debug "Dispatching notification for event $event_type to channels (content_type: $content_type)"
-        notification_send "$subject" "$body" "$content_type" || log_warn "Notification delivery failed for event $event_type"
+        notification_send "$subject" "$body" "$content_type" "$event_json" || log_warn "Notification delivery failed for event $event_type"
     else
         log_debug "Notification suppressed for event $event_type (policy: notify=false)"
     fi
@@ -181,10 +193,10 @@ function dispatch_event() {
     local action
     action=$(echo "$decision" | jq -r '.action // "none"')
     if [[ "$action" == "auto-update" ]]; then
-        log_debug "Policy action=auto-update for event $event_type — enqueuing job"
+        log_debug "Policy action=auto-update for event $event_type - enqueuing job"
         enqueue_job "$event_json" "$decision"
     else
-        log_debug "Policy action=$action for event $event_type — no enqueue"
+        log_debug "Policy action=$action for event $event_type - no enqueue"
     fi
 
     # Echo the decision so callers can use it.

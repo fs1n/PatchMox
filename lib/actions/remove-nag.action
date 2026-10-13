@@ -1,60 +1,128 @@
 #!/usr/bin/env bash
 #
 # Module: remove-nag.action (PatchMox)
-# Description: Removes the SVG update banner from a Proxmox VM description.
+# Description: Removes SVG update banners from Proxmox VM descriptions and
+#              cleans up all PatchMox traces (used by `patchmox cleanup`).
 # Author: Frederik S. (fs1n) and PatchMox Contributors
 # Date: 2026-07-15
 #
-# Dependencies: pvesh, qm, jq, grep, sed
-# Environment: N/A
+# Dependencies: pve.func, jq, grep, sed
+# Environment: SVG_IMAGE_PATH, STATE_DIR
 # Usage: source lib/actions/remove-nag.action; remove_vm_nag "pve-01" 100
+
+# @function _strip_update_nag
+# @description pve_edit_vm_description callback: removes the banner of $NAG_VMID.
+# @args description (string)
+# @returns new description on stdout; 3 if no banner present; 1 if the banner
+#          markup is not recognized (it would stay in the description)
+function _strip_update_nag() {
+    local description="$1"
+    if [[ "$description" != *"update-$NAG_VMID.svg"* ]]; then
+        return 3
+    fi
+    local stripped
+    stripped=$(echo "$description" \
+        | sed -E "s|(<a[^>]*>)?<img src=\"/pve2/images/update-$NAG_VMID\.svg\"[^>]*/>(</a>)?(<hr/>)?||g" \
+        | sed -E 's|<hr/>(<hr/>)+|<hr/>|g' | sed -E 's|^<hr/>||' | sed -E 's|<hr/>$||') || return 1
+    if [[ "$stripped" == *"update-$NAG_VMID.svg"* ]]; then
+        log_warn "VM $NAG_VMID: banner markup in description not recognized, remove it manually"
+        return 1
+    fi
+    printf '%s\n' "$stripped"
+}
 
 # @function remove_vm_nag
 # @description Removes the SVG update banner from VM description, preserving other content.
-#              Suppresses qm set stdout so it does not pollute the terminal during progress output.
+#              Uses the cluster API with config digest (no lost concurrent edits).
 # @args node (string): Proxmox node name
 #       vmid (string): Proxmox VM ID
 function remove_vm_nag() {
     local node=$1
     local vmid=$2
 
-    local current_vm_config
-    current_vm_config=$(pvesh get /nodes/$node/qemu/$vmid/config --output-format json 2>/dev/null)
-    local current_description
-    current_description=$(echo "$current_vm_config" | jq -r '.description // empty')
-
-    if [[ -z "$current_description" ]] || ! echo "$current_description" | grep -Fq "update-$vmid.svg"; then
-        log_debug "No update nag found for VM $vmid"
+    if NAG_VMID="$vmid" pve_edit_vm_description "$node" "$vmid" _strip_update_nag; then
+        log_info "Removed update nag from VM $vmid (if present)"
         return 0
     fi
-
-    local new_description
-    new_description=$(echo "$current_description" | sed -E "s|(<a[^>]*>)?<img src=\"/pve2/images/update-$vmid\.svg\"[^>]*/>(</a>)?(<hr/>)?||g")
-    new_description=$(echo "$new_description" | sed -E 's|<hr/>(<hr/>)+|<hr/>|g' | sed -E 's|^<hr/>||' | sed -E 's|<hr/>$||')
-
-    local description_arg="$new_description"
-    if [[ -z "$description_arg" || "$description_arg" == "null" ]]; then
-        description_arg=""
-    fi
-
-    if qm set "$vmid" -description "$description_arg" >/dev/null 2>&1; then
-        log_info "Removed update nag from VM $vmid"
-        return 0
-    else
-        log_error "Failed to remove update nag from VM $vmid"
-        return 1
-    fi
+    log_error "Failed to remove update nag from VM $vmid"
+    return 1
 }
 
-# @function remove_vm_nag
-# @description Legacy alias kept for compatibility with callers that pass a single vmid.
-function remove_nag_for_vm() {
+# @function list_vms_with_nag
+# @description Lists all QEMU VMs in the cluster (any status, templates included)
+#              whose description contains a PatchMox update banner.
+# @args [vmid...] (optional): only look at these VMs (all VMs when omitted)
+# @returns "vmid node" lines for VMs with a banner and "vmid node unreadable"
+#          lines for VMs whose config could not be read (banner state unknown);
+#          1 if cluster resources cannot be read
+function list_vms_with_nag() {
+    local resources
+    if ! resources=$(pve_api get /cluster/resources --type vm) || [[ -z "$resources" ]]; then
+        log_error "Failed to fetch /cluster/resources"
+        return 1
+    fi
+
+    local ids_json
+    ids_json=$(printf '%s\n' "$@" | jq -R 'select(length > 0)' | jq -s .)
+
+    local vmid node config description
+    while read -r vmid node; do
+        [[ -z "$vmid" ]] && continue
+        if ! config=$(pve_get_vm_config "$node" "$vmid"); then
+            echo "$vmid $node unreadable"
+            continue
+        fi
+        description=$(jq -r '.description // empty' <<< "$config" 2>/dev/null) || description=""
+        if [[ "$description" == *"update-$vmid.svg"* ]]; then
+            echo "$vmid $node"
+        fi
+    done < <(jq -r --argjson ids "$ids_json" '
+        .[] | select(.type == "qemu")
+            | select(($ids | length) == 0 or ((.vmid | tostring) as $v | $ids | index($v)) != null)
+            | "\(.vmid) \(.node)"' <<< "$resources")
+}
+
+# @function remove_nag_svg_files
+# @description Deletes rendered banner images (update-<vmid>.svg) from SVG_IMAGE_PATH.
+# @args vmid (string, optional): only this VM; all banners when omitted
+#       dry_run (bool, optional): only print what would be deleted
+#       keep_vmids (string, optional): space-separated VM IDs whose image must stay
+#                  (their banner is still in the description)
+# @returns number of files on stdout
+function remove_nag_svg_files() {
+    local vmid="${1:-}"
+    local dry_run="${2:-false}"
+    local keep_vmids=" ${3:-} "
+    local image_dir="${SVG_IMAGE_PATH:-/usr/share/pve-manager/images/}"
+    local count=0 svg_file name
+
+    shopt -s nullglob
+    for svg_file in "${image_dir%/}"/update-*.svg; do
+        name=$(basename "$svg_file")
+        [[ "$name" =~ ^update-([0-9]+)\.svg$ ]] || continue
+        if [[ -n "$vmid" && "${BASH_REMATCH[1]}" != "$vmid" ]]; then
+            continue
+        fi
+        if [[ "$keep_vmids" == *" ${BASH_REMATCH[1]} "* ]]; then
+            continue
+        fi
+        if [[ "$dry_run" != true ]]; then
+            rm -f "$svg_file"
+        fi
+        count=$((count + 1))
+    done
+    shopt -u nullglob
+
+    echo "$count"
+}
+
+# @function mark_nag_inactive
+# @description Sets NAG_ACTIVE=false in the stored state of a VM (if any).
+# @args vmid (string): Proxmox VM ID
+function mark_nag_inactive() {
     local vmid=$1
-    local node
-    node=$(echo "$windows_vms" | jq -r --arg vmid "$vmid" '.[$vmid].node // empty')
-    if [[ -n "$node" ]]; then
-        remove_vm_nag "$node" "$vmid"
-    else
-        log_warn "remove_nag_for_vm: could not find node for VM $vmid"
+    local state_file="${STATE_DIR}/vm-${vmid}.state"
+    if [[ -f "$state_file" ]]; then
+        sed -i 's/^NAG_ACTIVE=.*/NAG_ACTIVE=false/' "$state_file"
     fi
 }

@@ -8,7 +8,8 @@ PatchMox runs on a Proxmox VE node. It needs root-equivalent privileges because 
 
 - Proxmox VE 8.0+ (tested on 8.x and 9.x)
 - Bash 4+
-- `jq`, `curl`, `pvesh`, `qm`, `sed`, `awk`, `grep`
+- `jq`, `curl`, `pvesh`, `sed`, `awk`, `grep`
+- `flock`, `timeout`, `iconv`, `base64` (part of every Proxmox VE / Debian install)
 - Network access to `https://fedorapeople.org` for version checks
 
 ### Guest (Windows VMs)
@@ -18,7 +19,28 @@ PatchMox runs on a Proxmox VE node. It needs root-equivalent privileges because 
 - QEMU Guest Agent installed and running
 - VirtIO drivers installed via the VirtIO installer
 
-## Quick install
+## Debian package (recommended)
+
+Download the `.deb` from the [releases](https://github.com/fs1n/PatchMox/releases) page and install it on the Proxmox node:
+
+```bash
+apt install ./patchmox_<version>_all.deb
+nano /etc/patchmox/patchmox.env
+patchmox check
+systemctl enable --now patchmox.timer   # daily check at ~06:00
+```
+
+| Path | Content |
+|------|---------|
+| `/etc/patchmox/patchmox.env` | Configuration (kept on upgrade) |
+| `/etc/patchmox/policies.d/` | Your own policies (a file named like a built-in one replaces it) |
+| `/usr/share/patchmox/policies/` | Built-in policies |
+| `/var/lib/patchmox/` | State and job queue |
+| `/var/log/patchmox/` | Logs |
+
+`patchmox version` shows the installed version. Build the package yourself with [nfpm](https://nfpm.goreleaser.com/): `packaging/build-deb.sh`. Pushing a `v*` tag builds the package in CI (version = tag) and attaches it to a GitHub release.
+
+## Quick install (git)
 
 ```bash
 # Clone to /opt/patchmox (recommended production location)
@@ -95,9 +117,27 @@ git pull
 
 ## Uninstall
 
+Debian package: `apt remove patchmox` (banners are removed automatically), `apt purge patchmox` also deletes config, state and logs.
+
+Git install:
+
 ```bash
+patchmox cleanup          # remove update banners from all VMs
 rm /usr/local/bin/patchmox
 rm -rf /opt/patchmox
 rm -rf /etc/systemd/system/patchmox-check.*
 systemctl daemon-reload
 ```
+
+## Upgrading from the legacy scripts
+
+The wrappers `check-vm-updates.sh` and `vm-update.sh` have been removed, together with the inbound "click to update" webhook. If a cron job or systemd timer still calls them, switch it to the CLI:
+
+```bash
+# before
+/opt/patchmox/check-vm-updates.sh
+# after
+/opt/patchmox/bin/patchmox check
+```
+
+Old clickable banners are removed with `patchmox cleanup` (the next check adds the new ones). Leftovers on existing hosts can be removed manually: `/opt/patchmox/check-vm-updates.sh`, `/opt/patchmox/vm-update.sh`, `/opt/patchmox/webhook/` and the `patchmox-webhook.service` unit.

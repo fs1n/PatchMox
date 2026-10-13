@@ -10,4 +10,5 @@ email.txt
 .claude/
 AGENTS.md
 queue/
-webhook/
+build/
+dist/

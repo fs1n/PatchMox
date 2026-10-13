@@ -1,0 +1,11 @@
+[Unit]
+Description=Daily PatchMox update check
+Documentation=https://github.com/fs1n/PatchMox
+
+[Timer]
+OnCalendar=*-*-* 06:00:00
+RandomizedDelaySec=15m
+Persistent=true
+
+[Install]
+WantedBy=timers.target
