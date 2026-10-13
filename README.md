@@ -49,6 +49,7 @@ patchmox cleanup
 - Proxmox VE 8.0+
 - Bash 4+
 - `jq`, `curl`, `pvesh`
+- `flock`, `timeout`, `iconv`, `base64` (part of every Proxmox VE / Debian install)
 - Windows guests with QEMU Guest Agent and VirtIO drivers installed
 
 ## License

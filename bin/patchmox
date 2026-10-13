@@ -86,11 +86,6 @@ shift || true
 #              The lock is released automatically when the process exits.
 function acquire_run_lock() {
   ensure_state_dir || exit 1
-  if ! command -v flock >/dev/null 2>&1; then
-    log_error "flock (util-linux) is required but not found"
-    echo "ERROR: flock (util-linux) is required but not found" >&2
-    exit 1
-  fi
   local lock_file="$STATE_DIR/patchmox.lock"
   exec 9>"$lock_file"
   if ! flock -n 9; then
@@ -139,6 +134,7 @@ function cmd_check() {
     GUEST_AGENT_CACHE_FORCE_REFRESH=true
   fi
 
+  check_script_dependencies || exit 1
   acquire_run_lock
 
   # Ensure spinner/progress is cleaned up on interrupt or normal exit.
@@ -147,7 +143,6 @@ function cmd_check() {
 
   init_state_dir
   load_policies
-  check_script_dependencies
 
   start_spinner "Discovering Windows VMs..."
   local windows_vms_all
@@ -708,6 +703,7 @@ function cmd_cleanup() {
     esac
   done
 
+  check_script_dependencies || exit 1
   [[ "$DRY_RUN" == true ]] || acquire_run_lock
 
   local vms_with_nag
