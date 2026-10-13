@@ -197,7 +197,7 @@ function pve_set_vm_config() {
 # @description Changes a VM description via a callback, protected by the config
 #              digest. If someone else changed the config in between, Proxmox
 #              rejects the write and the edit is retried with the fresh config.
-# @args node, vmid, callback — callback gets the current description as $1 and
+# @args node, vmid, callback - callback gets the current description as $1 and
 #       prints the new one; callback exit 3 = no change needed, any other
 #       non-zero exit = error (the description is left unchanged)
 # @returns 0 on success or if nothing changed, 1 on error
@@ -259,7 +259,7 @@ function pve_guest_exec() {
     done
 
     local start_json pid
-    # Failure here is usually "guest agent not running" — a warning, not an error.
+    # Failure here is usually "guest agent not running" - a warning, not an error.
     start_json=$(pve_api --warn create "/nodes/$node/qemu/$vmid/agent/exec" "${cmd_args[@]}") || return 1
     pid=$(jq -r '.pid // empty' <<< "$start_json")
     if [[ -z "$pid" ]]; then

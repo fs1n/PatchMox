@@ -165,6 +165,6 @@ function maybe_show_update_nag() {
     log_info "Nag shown for VM $vmid (VirtIO: $virtio_ver → $current_virtio, QEMU-GA: $qemu_ver → $current_qemu)"
     return 0
   fi
-  # Caller counts shown nags and emits nag.shown — only on real success.
+  # Caller counts shown nags and emits nag.shown - only on real success.
   return 1
 }

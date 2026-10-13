@@ -237,11 +237,11 @@ function get_cached_guest_versions() {
     local current_status="${3:-}"
 
     if ! is_guest_agent_cache_valid "$vmid" "$current_vmgenid" "$current_status"; then
-        log_debug "Guest-agent cache miss for VM $vmid — will query guest agent"
+        log_debug "Guest-agent cache miss for VM $vmid - will query guest agent"
         return 1
     fi
 
-    log_debug "Guest-agent cache hit for VM $vmid — returning cached versions"
+    log_debug "Guest-agent cache hit for VM $vmid - returning cached versions"
     jq -n \
         --arg virtio "$STORED_VIRTIO_VERSION" \
         --arg qemu_ga "$STORED_QEMU_GA_VERSION" \

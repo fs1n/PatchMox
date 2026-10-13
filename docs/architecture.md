@@ -8,7 +8,7 @@ PatchMox is a host-side Bash orchestrator for Proxmox VE. It discovers Windows V
 Trigger (cron / systemd timer / manual)
     │
     ▼
-Source: virtio.source — discover VMs, query guest-agent, fetch latest versions
+Source: virtio.source - discover VMs, query guest-agent, fetch latest versions
     │
     ▼
 Event Bus: dispatch_event("update.available", payload)
@@ -36,7 +36,7 @@ Event Bus: dispatch_event("update.available", payload)
 |------|--------------|
 | `logger.func` | File, console (stderr), and journal logging |
 | `pve.func` | Proxmox API layer: `pve_api` (timeout, error capture), task polling (`pve_wait_task`), guest-agent exec, digest-protected config edits |
-| `events.func` | `build_event`, `emit_event`, `dispatch_event` — event pipeline entry point, payload builders |
+| `events.func` | `build_event`, `emit_event`, `dispatch_event` - event pipeline entry point, payload builders |
 | `policy.func` | Load and evaluate policy files (`load_policies`, `evaluate_policy`, `_policy_matches_event`) |
 | `state.func` | Per-VM persistent state, guest-agent cache |
 | `queue.func` | Filesystem job queue primitives |
@@ -62,7 +62,7 @@ Event Bus: dispatch_event("update.available", payload)
 
 | File | Responsibility |
 |------|--------------|
-| `_dispatcher.channel` | `notification_send` — routes to enabled channels via `NOTIFICATION_CHANNELS` |
+| `_dispatcher.channel` | `notification_send` - routes to enabled channels via `NOTIFICATION_CHANNELS` |
 | `smtp.channel` | SMTP notifications via curl |
 | `msgraph.channel` | MS Graph notifications (stub) |
 | `webhook.channel` | Outgoing webhook notifications (JSON POST) |
@@ -95,8 +95,8 @@ Empty `match` = matches everything. The `99-default.policy` file has an empty ma
 
 PatchMox keeps durable state in two places:
 
-- `.state/vm-${vmid}.state` — vmgenid, last seen versions, nag status, last checked timestamp.
-- `queue/{pending,claimed,running,done,failed}/${job_id}.json` — durable audit trail of actions.
+- `.state/vm-${vmid}.state` - vmgenid, last seen versions, nag status, last checked timestamp.
+- `queue/{pending,claimed,running,done,failed}/${job_id}.json` - durable audit trail of actions.
 
 Events are emitted to stdout for logging. They are not persisted to a separate journal; queue files are the source of truth for "what happened and when".
 

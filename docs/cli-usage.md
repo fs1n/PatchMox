@@ -104,7 +104,7 @@ patchmox cleanup --vmid 100
 
 The Debian package runs `patchmox cleanup` automatically on `apt remove`. On a cluster, banner images live on the node that ran PatchMox; run `cleanup` there (descriptions are cleaned cluster-wide from any node).
 
-Note: the next `patchmox check` shows banners again for VMs that still need updates — stop the timer first if you want them gone for good.
+Note: the next `patchmox check` shows banners again for VMs that still need updates - stop the timer first if you want them gone for good.
 
 ## `patchmox version`
 

@@ -100,7 +100,7 @@ function _refresh_version_cache() {
     local cache_file
     cache_file=$(_version_cache_path) || return 1
     if _version_cache_has_versions "$cache_file"; then
-        log_warn "Fedora Archive not reachable — using expired version cache from $(jq -r '.fetched_at' "$cache_file")"
+        log_warn "Fedora Archive not reachable - using expired version cache from $(jq -r '.fetched_at' "$cache_file")"
         return 0
     fi
 
@@ -293,7 +293,7 @@ function get_windows_vms() {
         IFS= read -r vm_name
         IFS= read -r status
 
-        # Skip templates entirely — they are never update targets.
+        # Skip templates entirely - they are never update targets.
         # Only fetch config for running VMs; stopped VMs get ostype=null
         # (cheaper than a pvesh round-trip per stopped VM).
         if [[ "$status" != "running" ]]; then
@@ -315,7 +315,7 @@ function get_windows_vms() {
 
         os_type=$(echo "$vm_config" | jq -r '.ostype // empty')
 
-        # Skip non-Windows VMs early — no need to include them in the result.
+        # Skip non-Windows VMs early - no need to include them in the result.
         if [[ -z "$os_type" || "$os_type" != w* ]]; then
             log_debug "VM $vmid ($vm_name) is not Windows (ostype: ${os_type:-null}), skipping"
             continue

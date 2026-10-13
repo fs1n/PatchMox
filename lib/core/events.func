@@ -193,10 +193,10 @@ function dispatch_event() {
     local action
     action=$(echo "$decision" | jq -r '.action // "none"')
     if [[ "$action" == "auto-update" ]]; then
-        log_debug "Policy action=auto-update for event $event_type — enqueuing job"
+        log_debug "Policy action=auto-update for event $event_type - enqueuing job"
         enqueue_job "$event_json" "$decision"
     else
-        log_debug "Policy action=$action for event $event_type — no enqueue"
+        log_debug "Policy action=$action for event $event_type - no enqueue"
     fi
 
     # Echo the decision so callers can use it.

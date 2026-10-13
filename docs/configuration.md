@@ -39,7 +39,7 @@ Keep `PATCHMOX_CONSOLE_LOG=false` for cron/systemd. Set it to `true` when runnin
 | Variable | Default | Meaning |
 |----------|---------|---------|
 | `POLICY_DIR` | `<patchmox>/policies` (package: `/usr/share/patchmox/policies`) | Built-in policies |
-| `POLICY_LOCAL_DIR` | — (package: `/etc/patchmox/policies.d`) | Your own policies |
+| `POLICY_LOCAL_DIR` | - (package: `/etc/patchmox/policies.d`) | Your own policies |
 
 All `*.policy` files from both directories are evaluated ordered by file name; first match wins. A file in `POLICY_LOCAL_DIR` with the same name as a built-in one replaces it (e.g. your own `99-default.policy`).
 
@@ -101,9 +101,9 @@ When `webhook` is listed in `NOTIFICATION_CHANNELS`, every notification (e.g. `u
 
 | Variable | Default | Meaning |
 |----------|---------|---------|
-| `WEBHOOK_URL` | — | Target URL (required) |
+| `WEBHOOK_URL` | - | Target URL (required) |
 | `WEBHOOK_METHOD` | `POST` | HTTP method |
-| `WEBHOOK_HEADERS` | — | Extra headers as JSON object, e.g. `{"Authorization": "Bearer ..."}` |
+| `WEBHOOK_HEADERS` | - | Extra headers as JSON object, e.g. `{"Authorization": "Bearer ..."}` |
 | `WEBHOOK_TIMEOUT` | `10` | Request timeout in seconds |
 
 Payload:

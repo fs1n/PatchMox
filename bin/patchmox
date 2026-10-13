@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# PatchMox — Proxmox VE update orchestrator
+# PatchMox - Proxmox VE update orchestrator
 # Author: Frederik S. (fs1n) and PatchMox Contributors
 # Date: 2026-07-15
 #
@@ -103,7 +103,7 @@ function acquire_run_lock() {
 
 function show_help() {
   cat <<EOF
-PatchMox ${PATCHMOX_VERSION} — Proxmox VE update orchestrator
+PatchMox ${PATCHMOX_VERSION} - Proxmox VE update orchestrator
 
 Usage:
   patchmox check [--vmid ID] [--force-refresh]
@@ -208,7 +208,7 @@ function cmd_check() {
 
   log_debug "Latest versions: VirtIO=$CurrentVirtIOVersion (release: $CurrentVirtIORelease), QEMU GA=$CurrentQEMUGAVersion (release: $CurrentQEMUGARelease)"
 
-  # check.started is informational only — no policy/notification needed.
+  # check.started is informational only - no policy/notification needed.
   emit_event "check.started" "$(build_check_started_payload "$CurrentVirtIOVersion" "$CurrentQEMUGAVersion")" >/dev/null
 
   local total_vms vm_index
@@ -281,7 +281,7 @@ function cmd_check() {
       "$QEMU_GA_version" "$CurrentQEMUGAVersion" \
       "$components_json")
 
-    # vm.checked is informational — log only, no policy dispatch.
+    # vm.checked is informational - log only, no policy dispatch.
     emit_event "vm.checked" "$event_payload" >/dev/null
 
     local vm_result="up to date"
@@ -628,7 +628,7 @@ function cmd_policy() {
     pname=$(jq -r '.name // "unnamed"' "$pf")
     local paction
     paction=$(jq -r '.decision.action // "none"' "$pf")
-    echo "  $pname (action: $paction) — $pf"
+    echo "  $pname (action: $paction) - $pf"
   done
   echo ""
 
@@ -651,7 +651,7 @@ function cmd_policy() {
 
   if [[ "$DRY_RUN" == true ]]; then
     echo ""
-    echo "Dry run — no actions would be taken."
+    echo "Dry run - no actions would be taken."
     local action notify
     action=$(echo "$decision" | jq -r '.action // "none"')
     notify=$(echo "$decision" | jq -r '.notify // false')

@@ -8,7 +8,7 @@ if [ "$1" = "remove" ]; then
     fi
     # Remove update banners from all VM descriptions. Never block removal.
     if [ -x /usr/bin/patchmox ]; then
-        /usr/bin/patchmox cleanup || echo "patchmox: banner cleanup failed — remove the update banners from the VM descriptions manually" >&2
+        /usr/bin/patchmox cleanup || echo "patchmox: banner cleanup failed - remove the update banners from the VM descriptions manually" >&2
     fi
 fi
 
